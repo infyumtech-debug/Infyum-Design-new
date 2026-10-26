@@ -329,7 +329,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const currentHost = typeof window !== 'undefined' ? window.location.hostname : '192.168.1.17';
 
       if (err.code === 'auth/unauthorized-domain') {
-        msg = `Domain not authorized in Firebase: "${currentHost}".\n\nTo enable Google Sign-In from this network computer:\n1. Open Firebase Console (https://console.firebase.google.com/)\n2. Select project "creative-studio-f19a6" -> Authentication -> Settings -> Authorized domains\n3. Click "Add domain" and enter "${currentHost}"\n4. Click Save.\n\nOr sign in directly using the "Email & Password" tab below with any personal email.`;
+        msg = `Domain not authorized in Firebase: "${currentHost}".\n\nTo enable Google Sign-In for this domain:\n1. Open Firebase Console (https://console.firebase.google.com/u/0/project/creative-studio-f19a6/authentication/settings)\n2. Under "Authorized domains", click "Add domain"\n3. Enter "${currentHost}" and click Save.\n\nAlternatively, switch to the "Email & Password" tab to sign in or register instantly.`;
       } else if (err.code === 'auth/popup-blocked') {
         msg = 'Sign-in popup was blocked by your browser. Please allow popups or use Email & Password below.';
       } else if (err.code === 'auth/popup-closed-by-user') {

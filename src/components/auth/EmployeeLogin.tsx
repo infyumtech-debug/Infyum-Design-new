@@ -4,7 +4,7 @@ import { BrandLogo } from '../common/BrandLogo';
 import { ThemeToggle } from '../common/ThemeToggle';
 import { Footer } from '../common/Footer';
 import infyumMark from '../../assets/infyum-mark.png';
-import { Shield, ArrowRight, Lock, AlertCircle, Mail, User, KeyRound, Globe } from 'lucide-react';
+import { Shield, ArrowRight, Lock, AlertCircle, Mail, User, KeyRound } from 'lucide-react';
 
 interface EmployeeLoginProps {
   onNavigateToAdmin: () => void;
@@ -27,10 +27,6 @@ export const EmployeeLogin: React.FC<EmployeeLoginProps> = ({ onNavigateToAdmin 
   const [password, setPassword] = useState<string>('');
   const [name, setName] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-
-  const isNetworkHost = typeof window !== 'undefined' && 
-    window.location.hostname !== 'localhost' && 
-    window.location.hostname !== '127.0.0.1';
 
   const handleGoogleSignIn = async () => {
     try {
@@ -167,18 +163,6 @@ export const EmployeeLogin: React.FC<EmployeeLoginProps> = ({ onNavigateToAdmin 
             {/* Method 1: Google Sign In */}
             {authMethod === 'google' && (
               <div className="space-y-4">
-                {isNetworkHost && (
-                  <div className="p-3 bg-amber-50/90 border border-amber-200 rounded-2xl text-[11px] text-amber-900 space-y-1">
-                    <div className="font-semibold flex items-center gap-1.5 text-amber-800">
-                      <Globe className="w-3.5 h-3.5 shrink-0" />
-                      <span>Network Host: {window.location.hostname}</span>
-                    </div>
-                    <p className="text-amber-700 leading-relaxed">
-                      Google OAuth requires this IP to be added to Firebase Console Authorized Domains. If you haven't added it yet, switch to the <strong>Email & Password</strong> tab above to sign in or register instantly with your personal email without any domain restriction.
-                    </p>
-                  </div>
-                )}
-
                 <button
                   onClick={handleGoogleSignIn}
                   disabled={isLoading}
