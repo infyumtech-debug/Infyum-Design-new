@@ -53,7 +53,7 @@ export interface AuthContextType {
   error: string | null;
 
   // Actions
-  signInWithGoogle: (demoEmail?: string, demoName?: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signInEmployeeWithEmail: (email: string, pass: string) => Promise<void>;
   signUpEmployeeWithEmail: (email: string, pass: string, name: string) => Promise<void>;
   signInAdmin: (email: string, pass: string) => Promise<void>;
@@ -220,113 +220,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Employee Google Sign-In (Operates on employeeAuth with popup or redirect)
-  const signInWithGoogle = async (demoEmail?: string, demoName?: string) => {
+  const signInWithGoogle = async () => {
     setIsEmployeeLoading(true);
     setError(null);
 
     try {
-      if (isFirebaseConfigured && employeeAuth && googleProvider) {
-        let fbUser: FirebaseUser;
-        try {
-          const result = await signInWithPopup(employeeAuth, googleProvider);
-          fbUser = result.user;
-        } catch (popupErr: any) {
-          if (popupErr.code === 'auth/popup-blocked') {
-            console.warn('Popup blocked, attempting redirect sign-in');
-            await signInWithRedirect(employeeAuth, googleProvider);
-            return;
-          }
-          throw popupErr;
-        }
-
-        const userEmail = (fbUser.email || '').toLowerCase();
-
-        // If the authenticated user is the Administrator, authenticate as Admin seamlessly!
-        if (userEmail === ADMIN_EMAIL.toLowerCase()) {
-          const adminSession: AuthUser = {
-            uid: fbUser.uid,
-            email: ADMIN_EMAIL,
-            displayName: fbUser.displayName || 'Infyum Administrator',
-            photoURL: fbUser.photoURL || undefined,
-            role: 'admin'
-          };
-          setAdminUser(adminSession);
-          setEmployeeUser(adminSession);
-          setEmployeeProfile({
-            uid: fbUser.uid,
-            name: fbUser.displayName || 'Infyum Administrator',
-            email: ADMIN_EMAIL,
-            photoURL: fbUser.photoURL || '',
-            status: 'approved',
-            isApproved: true,
-            canUseTools: true,
-            createdAt: new Date().toISOString(),
-            lastLoginAt: new Date().toISOString()
-          });
-          await logLoginActivity(fbUser.uid, userEmail, 'admin_login');
-          await verifyAndRecordAdmin(fbUser.uid, userEmail);
-          return;
-        }
-
-        const employee = await registerOrUpdateEmployee({
-          uid: fbUser.uid,
-          name: fbUser.displayName || 'Infyum Employee',
-          email: userEmail,
-          photoURL: fbUser.photoURL || undefined
-        });
-
-        await logLoginActivity(fbUser.uid, userEmail, 'login');
-
-        setEmployeeUser({
-          uid: fbUser.uid,
-          email: userEmail,
-          displayName: fbUser.displayName || 'Infyum Employee',
-          photoURL: fbUser.photoURL || undefined,
-          role: 'employee'
-        });
-        setEmployeeProfile(employee);
-      } else {
-        // Fallback demo for employee testing
-        const email = (demoEmail || 'sarah.jenkins@infyum.com').toLowerCase();
-        const name = demoName || (email.split('@')[0].replace('.', ' ').toUpperCase());
-        const uid = 'emp-' + btoa(email).substring(0, 10).replace(/=/g, '');
-
-        if (email === ADMIN_EMAIL.toLowerCase()) {
-          const adminSession: AuthUser = {
-            uid,
-            email: ADMIN_EMAIL,
-            displayName: 'Infyum Administrator',
-            role: 'admin'
-          };
-          setAdminUser(adminSession);
-          setEmployeeUser(adminSession);
-          return;
-        }
-
-        const employee = await registerOrUpdateEmployee({
-          uid,
-          name,
-          email,
-          photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-        });
-
-        await logLoginActivity(uid, email, 'login');
-
-        const sessionUser: AuthUser = {
-          uid,
-          email,
-          displayName: name,
-          photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-          role: 'employee'
-        };
-
-        setEmployeeUser(sessionUser);
-        setEmployeeProfile(employee);
+      if (!isFirebaseConfigured || !employeeAuth || !googleProvider) {
+        throw new Error('Firebase Authentication is not available. Please try again or use Email & Password sign-in.');
       }
+
+      let fbUser: FirebaseUser;
+      try {
+        const result = await signInWithPopup(employeeAuth, googleProvider);
+        fbUser = result.user;
+      } catch (popupErr: any) {
+        if (popupErr.code === 'auth/popup-blocked') {
+          console.warn('Popup blocked, attempting redirect sign-in');
+          await signInWithRedirect(employeeAuth, googleProvider);
+          return;
+        }
+        throw popupErr;
+      }
+
+      const userEmail = (fbUser.email || '').toLowerCase();
+
+      // If the authenticated user is the Administrator, authenticate as Admin seamlessly!
+      if (userEmail === ADMIN_EMAIL.toLowerCase()) {
+        const adminSession: AuthUser = {
+          uid: fbUser.uid,
+          email: ADMIN_EMAIL,
+          displayName: fbUser.displayName || 'Infyum Administrator',
+          photoURL: fbUser.photoURL || undefined,
+          role: 'admin'
+        };
+        setAdminUser(adminSession);
+        setEmployeeUser(adminSession);
+        setEmployeeProfile({
+          uid: fbUser.uid,
+          name: fbUser.displayName || 'Infyum Administrator',
+          email: ADMIN_EMAIL,
+          photoURL: fbUser.photoURL || '',
+          status: 'approved',
+          isApproved: true,
+          canUseTools: true,
+          createdAt: new Date().toISOString(),
+          lastLoginAt: new Date().toISOString()
+        });
+        await logLoginActivity(fbUser.uid, userEmail, 'admin_login');
+        await verifyAndRecordAdmin(fbUser.uid, userEmail);
+        return;
+      }
+
+      const employee = await registerOrUpdateEmployee({
+        uid: fbUser.uid,
+        name: fbUser.displayName || 'Infyum Employee',
+        email: userEmail,
+        photoURL: fbUser.photoURL || undefined
+      });
+
+      await logLoginActivity(fbUser.uid, userEmail, 'login');
+
+      setEmployeeUser({
+        uid: fbUser.uid,
+        email: userEmail,
+        displayName: fbUser.displayName || 'Infyum Employee',
+        photoURL: fbUser.photoURL || undefined,
+        role: 'employee'
+      });
+      setEmployeeProfile(employee);
     } catch (err: any) {
       console.error('Google Sign-in failed:', err);
       let msg = 'Google sign-in failed. Please try again.';
-      const currentHost = typeof window !== 'undefined' ? window.location.hostname : '192.168.1.17';
+      const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
 
       if (err.code === 'auth/unauthorized-domain') {
         msg = `Domain not authorized in Firebase: "${currentHost}".\n\nTo enable Google Sign-In for this domain:\n1. Open Firebase Console (https://console.firebase.google.com/u/0/project/creative-studio-f19a6/authentication/settings)\n2. Under "Authorized domains", click "Add domain"\n3. Enter "${currentHost}" and click Save.\n\nAlternatively, switch to the "Email & Password" tab to sign in or register instantly.`;

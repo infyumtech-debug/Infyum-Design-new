@@ -10,12 +10,12 @@ import {
 } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCf1WaDZl8IRwQn89IU5yzYBv5yQDQtCs8',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'creative-studio-f19a6.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'creative-studio-f19a6',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'creative-studio-f19a6.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1092927951783',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1092927951783:web:6492abc1181b8b22b25c82',
 };
 
 // Check if valid Firebase credentials are provided

@@ -17,8 +17,7 @@ export const EmployeeLogin: React.FC<EmployeeLoginProps> = ({ onNavigateToAdmin 
     signUpEmployeeWithEmail,
     isLoading, 
     error, 
-    clearError, 
-    isFirebaseConfigured 
+    clearError 
   } = useAuth();
 
   const [authMethod, setAuthMethod] = useState<'google' | 'email'>('google');
@@ -52,15 +51,6 @@ export const EmployeeLogin: React.FC<EmployeeLoginProps> = ({ onNavigateToAdmin 
       // Handled by AuthContext
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleDemoSignIn = async (demoEmail: string, demoName: string) => {
-    try {
-      clearError();
-      await signInWithGoogle(demoEmail, demoName);
-    } catch {
-      // Error handled
     }
   };
 
@@ -306,57 +296,6 @@ export const EmployeeLogin: React.FC<EmployeeLoginProps> = ({ onNavigateToAdmin 
                 Access is strictly verified against the Infyum employee database. Newly registered accounts require Admin approval before Design Studio & AI Tools are unlocked.
               </p>
             </div>
-
-            {/* Demo Mode Quick Accounts (Displays when evaluating or before real keys) */}
-            {!isFirebaseConfigured && (
-              <div className="mt-6 pt-6 border-t border-dashed border-slate-200">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    Evaluation / Demo Mode Active
-                  </span>
-                  <span className="text-[10px] bg-red-100 text-red-800 font-semibold px-2 py-0.5 rounded-full">
-                    Ready to Test
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mb-3 text-left">
-                  Select a simulated account to test different approval statuses instantly:
-                </p>
-
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => handleDemoSignIn('sarah.jenkins@infyum.com', 'Sarah Jenkins')}
-                    className="w-full p-2.5 bg-slate-50 hover:bg-emerald-50/60 border border-slate-200 hover:border-emerald-300 rounded-xl flex items-center justify-between text-left transition-colors cursor-pointer group"
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-slate-800 group-hover:text-emerald-800">
-                        Sarah Jenkins
-                      </p>
-                      <p className="text-[11px] text-slate-500">sarah.jenkins@infyum.com</p>
-                    </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md">
-                      Approved
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDemoSignIn('alex.rivera@infyum.com', 'Alex Rivera')}
-                    className="w-full p-2.5 bg-slate-50 hover:bg-amber-50/60 border border-slate-200 hover:border-amber-300 rounded-xl flex items-center justify-between text-left transition-colors cursor-pointer group"
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-slate-800 group-hover:text-amber-800">
-                        Alex Rivera
-                      </p>
-                      <p className="text-[11px] text-slate-500">alex.rivera@infyum.com</p>
-                    </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md">
-                      Pending
-                    </span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </main>

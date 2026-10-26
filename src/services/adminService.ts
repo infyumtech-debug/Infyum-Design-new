@@ -24,86 +24,48 @@ const LOCAL_STORAGE_EMPLOYEES_KEY = 'infyum_employee_users_db';
 const LOCAL_STORAGE_AUDIT_KEY = 'infyum_access_audit_logs_db';
 const LOCAL_STORAGE_LOGIN_LOGS_KEY = 'infyum_login_activity_db';
 
-// Initial mock employees for demonstration/testing
-const INITIAL_MOCK_EMPLOYEES: EmployeeUser[] = [
-  {
-    uid: 'emp-001',
-    name: 'Sarah Jenkins',
-    email: 'sarah.jenkins@infyum.com',
-    photoURL: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
-    status: 'approved',
-    isApproved: true,
-    canUseTools: true,
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    lastLoginAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-  {
-    uid: 'emp-002',
-    name: 'Marcus Vance',
-    email: 'marcus.vance@infyum.com',
-    photoURL: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-    status: 'pending',
-    isApproved: false,
-    canUseTools: false,
-    createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
-    lastLoginAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-  },
-  {
-    uid: 'emp-003',
-    name: 'Elena Rostova',
-    email: 'elena.rostova@infyum.com',
-    photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    status: 'disabled',
-    isApproved: true,
-    canUseTools: false,
-    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
-    lastLoginAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-  },
-  {
-    uid: 'emp-004',
-    name: 'David Chen',
-    email: 'david.chen@infyum.com',
-    photoURL: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
-    status: 'pending',
-    isApproved: false,
-    canUseTools: false,
-    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-    lastLoginAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-  }
-];
+// Known legacy demo account emails to purge
+const DEMO_EMAILS = new Set([
+  'sarah.jenkins@infyum.com',
+  'marcus.vance@infyum.com',
+  'elena.rostova@infyum.com',
+  'david.chen@infyum.com',
+  'alex.rivera@infyum.com'
+]);
 
-// Helper to get local storage mock data
+// Helper to get local storage employee data (cleanses any legacy demo accounts)
 function getLocalEmployees(): EmployeeUser[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_EMPLOYEES_KEY);
     if (!raw) {
-      localStorage.setItem(LOCAL_STORAGE_EMPLOYEES_KEY, JSON.stringify(INITIAL_MOCK_EMPLOYEES));
-      return INITIAL_MOCK_EMPLOYEES;
+      return [];
     }
-    return JSON.parse(raw);
+    const parsed: EmployeeUser[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    
+    // Purge any legacy simulated demo accounts
+    const cleaned = parsed.filter(emp => !DEMO_EMAILS.has(emp.email?.toLowerCase()));
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(LOCAL_STORAGE_EMPLOYEES_KEY, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch {
-    return INITIAL_MOCK_EMPLOYEES;
+    return [];
   }
 }
 
 function saveLocalEmployees(employees: EmployeeUser[]) {
-  localStorage.setItem(LOCAL_STORAGE_EMPLOYEES_KEY, JSON.stringify(employees));
+  const cleaned = employees.filter(emp => !DEMO_EMAILS.has(emp.email?.toLowerCase()));
+  localStorage.setItem(LOCAL_STORAGE_EMPLOYEES_KEY, JSON.stringify(cleaned));
 }
 
 function getLocalAuditLogs(): AccessAuditLog[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_AUDIT_KEY);
-    return raw ? JSON.parse(raw) : [
-      {
-        id: 'aud-01',
-        changedBy: ADMIN_EMAIL,
-        employeeUid: 'emp-001',
-        employeeEmail: 'sarah.jenkins@infyum.com',
-        action: 'approved',
-        timestamp: new Date(Date.now() - 86400000 * 4).toISOString(),
-        details: 'Admin verified Infyum employee status.'
-      }
-    ];
+    if (!raw) return [];
+    const parsed: AccessAuditLog[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(log => !DEMO_EMAILS.has(log.employeeEmail?.toLowerCase()));
   } catch {
     return [];
   }
@@ -118,22 +80,10 @@ function saveLocalAuditLog(log: AccessAuditLog) {
 function getLocalLoginLogs(): LoginActivity[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_LOGIN_LOGS_KEY);
-    return raw ? JSON.parse(raw) : [
-      {
-        id: 'log-01',
-        uid: 'emp-001',
-        email: 'sarah.jenkins@infyum.com',
-        eventType: 'login',
-        timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-      },
-      {
-        id: 'log-02',
-        uid: 'admin-01',
-        email: ADMIN_EMAIL,
-        eventType: 'admin_login',
-        timestamp: new Date(Date.now() - 3600000 * 8).toISOString(),
-      }
-    ];
+    if (!raw) return [];
+    const parsed: LoginActivity[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(log => !DEMO_EMAILS.has(log.email?.toLowerCase()));
   } catch {
     return [];
   }
