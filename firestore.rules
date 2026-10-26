@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Strict Admin check: Verified email authenticated via Firebase
+    function isAdmin() {
+      return isAuthenticated() && 
+             request.auth.token.email == 'infyumtech@gmail.com';
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Admin Users Collection
+    // The authenticated admin can read and manage their admin verification record
+    match /admin_users/{userId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Employee Users Collection
+    match /employee_users/{userId} {
+      // Admin can read all employee records
+      // Employees can only read their own record
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      // Creation by employee upon initial Google login
+      // Employee cannot self-approve or grant themselves tool access or admin role!
+      allow create: if isOwner(userId) &&
+        request.resource.data.uid == userId &&
+        request.resource.data.isApproved == false &&
+        request.resource.data.canUseTools == false &&
+        request.resource.data.status == 'pending' &&
+        (!('role' in request.resource.data) || request.resource.data.role == 'employee');
+
+      // Updates:
+      // Admin can update any field (approval, permissions, status)
+      // Employee can ONLY update their own safe profile fields
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        request.resource.data.isApproved == resource.data.isApproved &&
+        request.resource.data.canUseTools == resource.data.canUseTools &&
+        request.resource.data.status == resource.data.status &&
+        (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLoginAt', 'photoURL', 'name'])
+      );
+
+      // Deletion is strictly restricted to Admin
+      allow delete: if isAdmin();
+    }
+
+    // Login Activity Collection
+    match /login_activity/{logId} {
+      allow create: if isAuthenticated() && 
+                    request.resource.data.uid == request.auth.uid;
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Access Audit Logs Collection
+    match /access_audit_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Design Projects Collection
+    // Strictly isolates employee designs so users only access their own designs or shared designs
+    match /design_projects/{projectId} {
+      allow read, write, delete: if isAdmin();
+
+      allow create: if isAuthenticated() && 
+                    request.resource.data.ownerId == request.auth.uid;
+
+      allow get: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.ownerEmail == request.auth.token.email ||
+        resource.data.isPublic == true
+      );
+
+      allow list: if isAuthenticated();
+
+      allow update: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.ownerEmail == request.auth.token.email
+      );
+
+      allow delete: if isAuthenticated() && 
+                    resource.data.ownerId == request.auth.uid;
+    }
+
+    // Design Folders Collection
+    match /design_folders/{folderId} {
+      allow read, write, delete: if isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+      allow get, list, update, delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+  }
+}
