@@ -9,7 +9,8 @@ import {
   downloadFile, 
   formatBytes, 
   type ImageConversionResult, 
-  type AIModelType 
+  type AIModelType,
+  type MattingMode
 } from '../../services/imageService';
 import { 
   Upload, 
@@ -26,7 +27,8 @@ import {
   ArrowLeft, 
   Palette, 
   Eye, 
-  Plus 
+  Plus,
+  RotateCw
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -69,9 +71,11 @@ const BG_COLOR_PRESETS = [
   { id: 'transparent', label: 'Transparent', value: 'transparent' },
   { id: 'white', label: 'White', value: '#ffffff' },
   { id: 'offwhite', label: 'Off White', value: '#f8fafc' },
+  { id: 'gray', label: 'Light Gray', value: '#e2e8f0' },
   { id: 'black', label: 'Midnight', value: '#0f172a' },
   { id: 'red', label: 'Coral Red', value: '#ef4444' },
   { id: 'blue', label: 'Ocean Blue', value: '#2563eb' },
+  { id: 'cyan', label: 'Sky Cyan', value: '#06b6d4' },
   { id: 'green', label: 'Emerald', value: '#10b981' },
   { id: 'yellow', label: 'Amber', value: '#f59e0b' },
   { id: 'purple', label: 'Lavender', value: '#8b5cf6' },
@@ -99,7 +103,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
 
   // Model & Processing Settings
   const [modelType, setModelType] = useState<AIModelType>('isnet_quint8');
-  const [cleanFringe, setCleanFringe] = useState<boolean>(true);
+  const [mattingMode, setMattingMode] = useState<MattingMode>('clean');
   const [modelReady, setModelReady] = useState<boolean>(false);
   const [hardwareAccel, setHardwareAccel] = useState<'webgpu' | 'wasm-simd'>('wasm-simd');
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
@@ -185,7 +189,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
       setImageDims(dims);
     }).catch(() => {});
 
-    executeBackgroundRemoval(file);
+    executeBackgroundRemoval(file, modelType, mattingMode);
   };
 
   const handleSampleClick = async (sample: typeof SAMPLE_IMAGES[0]) => {
@@ -212,7 +216,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
     setErrorMessage('Background removal was cancelled by user.');
   };
 
-  const executeBackgroundRemoval = async (file: File) => {
+  const executeBackgroundRemoval = async (file: File, selectedModel = modelType, selectedMatting = mattingMode) => {
     setIsProcessing(true);
     setErrorMessage(null);
     setProgressPercent(15);
@@ -232,8 +236,8 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
           setProgressPercent(pct);
         },
         apiKey.trim() || undefined,
-        modelType,
-        cleanFringe
+        selectedModel,
+        selectedMatting
       );
 
       setResult(output);
@@ -281,37 +285,50 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleDownload = () => {
-    if (!result) return;
-    // If a custom background color was selected, composite and download
-    if (selectedBgColor !== 'transparent') {
-      handleDownloadWithBg(result.url, selectedBgColor, result.filename);
-      return;
-    }
-    downloadFile(result.url, result.filename);
-  };
-
-  const handleDownloadWithBg = (transparentUrl: string, bgColor: string, filename: string) => {
+  const handleDownloadWithBg = (transparentUrl: string, bgColor: string, baseFilename: string) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
       const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || img.width;
-      canvas.height = img.naturalHeight || img.height;
-      const ctx = canvas.getContext('2d');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) return;
+
+      // Fill exact background color across 100% of canvas
       ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
+      ctx.fillRect(0, 0, width, height);
+
+      // Draw high-resolution transparent cutout on top
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, width, height);
+
       canvas.toBlob((blob) => {
         if (blob) {
           const url = URL.createObjectURL(blob);
-          downloadFile(url, filename.replace('.png', `_${bgColor.replace('#', '')}.png`));
-          setTimeout(() => URL.revokeObjectURL(url), 3000);
+          const colorName = bgColor.replace('#', '');
+          const filename = baseFilename.replace(/\.png$/i, `_bg_${colorName}.png`);
+          downloadFile(url, filename);
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
         }
       }, 'image/png');
     };
     img.src = transparentUrl;
+  };
+
+  const handleCycleMatting = () => {
+    const nextMode: MattingMode = 
+      mattingMode === 'clean' ? 'strong' :
+      mattingMode === 'strong' ? 'natural' :
+      mattingMode === 'natural' ? 'off' : 'clean';
+    
+    setMattingMode(nextMode);
+    if (selectedFile && !isProcessing) {
+      executeBackgroundRemoval(selectedFile, modelType, nextMode);
+    }
   };
 
   const handleSaveApiKey = (key: string) => {
@@ -338,9 +355,12 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
           {/* Engine Selector */}
           <div className="flex items-center p-1 bg-white border border-slate-200 rounded-xl text-xs font-bold shadow-xs">
             <button
-              onClick={() => setModelType('isnet_quint8')}
+              onClick={() => {
+                setModelType('isnet_quint8');
+                if (selectedFile && !isProcessing) executeBackgroundRemoval(selectedFile, 'isnet_quint8', mattingMode);
+              }}
               disabled={isProcessing}
-              title="Turbo Q8 (Recommended): 3x faster, 44MB weights, optimized SIMD"
+              title="Turbo Q8 (Recommended): 3x faster, optimized WASM SIMD execution"
               className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                 modelType === 'isnet_quint8'
                   ? 'bg-blue-600 text-white shadow-xs'
@@ -351,9 +371,12 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
               <span>Turbo Q8</span>
             </button>
             <button
-              onClick={() => setModelType('isnet_fp16')}
+              onClick={() => {
+                setModelType('isnet_fp16');
+                if (selectedFile && !isProcessing) executeBackgroundRemoval(selectedFile, 'isnet_fp16', mattingMode);
+              }}
               disabled={isProcessing}
-              title="Studio Precision FP16: 88MB float16 weights"
+              title="Studio Precision FP16: Full float16 weights for complex low-contrast subjects"
               className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                 modelType === 'isnet_fp16'
                   ? 'bg-blue-600 text-white shadow-xs'
@@ -364,19 +387,19 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
             </button>
           </div>
 
-          {/* Edge Matting Toggle */}
+          {/* Edge Matting Quality Cycle Button */}
           <button
-            onClick={() => setCleanFringe(!cleanFringe)}
+            onClick={handleCycleMatting}
             disabled={isProcessing}
-            title="Clean Edge Matting eliminates background noise while preserving fine hair"
-            className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-              cleanFringe
-                ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-2xs'
-                : 'bg-white text-slate-500 border-slate-200'
-            }`}
+            title="Cycle edge matting mode: Balanced (default), Strong (cleans stubborn backgrounds), Soft (flyaway hair), or Off"
+            className="px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 bg-blue-50 text-blue-700 border-blue-200 shadow-2xs hover:bg-blue-100/70"
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{cleanFringe ? 'Matting: Clean' : 'Matting: Off'}</span>
+            <span className="hidden sm:inline">
+              {mattingMode === 'clean' ? 'Matting: Balanced' :
+               mattingMode === 'strong' ? 'Matting: Strong' :
+               mattingMode === 'natural' ? 'Matting: Soft' : 'Matting: Off'}
+            </span>
           </button>
 
           {modelReady && (
@@ -592,7 +615,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                       <button
                         type="button"
                         onClick={() => setSelectedBgColor('transparent')}
-                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                        className="text-[11px] text-blue-600 hover:underline font-semibold cursor-pointer"
                       >
                         Reset to Transparent
                       </button>
@@ -613,13 +636,13 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                           title={preset.label}
                         >
                           {selectedBgColor === preset.value && (
-                            <Check className={`w-4 h-4 ${preset.value === '#ffffff' || preset.value === '#f8fafc' || preset.value === 'transparent' ? 'text-slate-900' : 'text-white'}`} />
+                            <Check className={`w-4 h-4 ${preset.value === '#ffffff' || preset.value === '#f8fafc' || preset.value === 'transparent' || preset.value === '#e2e8f0' ? 'text-slate-900' : 'text-white'}`} />
                           )}
                         </button>
                       ))}
 
-                      {/* Custom Color Input */}
-                      <div className="relative inline-flex items-center">
+                      {/* Custom Hex Color Input */}
+                      <div className="inline-flex items-center gap-1.5 pl-2 border-l border-slate-200">
                         <input
                           type="color"
                           value={customColor}
@@ -628,20 +651,30 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                             setSelectedBgColor(e.target.value);
                           }}
                           className="w-8 h-8 rounded-xl cursor-pointer border border-slate-200 p-0 overflow-hidden"
-                          title="Custom Hex Color"
+                          title="Custom Color Picker"
+                        />
+                        <input
+                          type="text"
+                          value={selectedBgColor === 'transparent' ? '' : selectedBgColor}
+                          placeholder="#hex"
+                          maxLength={7}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val.startsWith('#') || val === '') {
+                              setSelectedBgColor(val || 'transparent');
+                              if (val.length === 7) setCustomColor(val);
+                            }
+                          }}
+                          className="w-20 px-2 py-1 text-xs border border-slate-200 rounded-lg font-mono focus:outline-hidden focus:border-blue-500 bg-white"
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Main Preview Container */}
-                <div 
-                  className={`aspect-4/3 w-full rounded-2xl overflow-hidden flex items-center justify-center relative border border-slate-200 transition-colors ${
-                    selectedBgColor === 'transparent' ? 'bg-checkerboard' : ''
-                  }`}
-                  style={selectedBgColor !== 'transparent' ? { backgroundColor: selectedBgColor } : {}}
-                >
+                {/* Main Preview Container — Responsive Viewport with Image Hugging Aspect Ratio */}
+                <div className="w-full min-h-[360px] md:min-h-[460px] max-h-[580px] bg-slate-50/80 rounded-2xl border border-slate-200/80 p-3 sm:p-6 flex items-center justify-center relative overflow-hidden">
+                  
                   {/* Processing Overlay */}
                   {isProcessing && (
                     <div className="absolute inset-0 bg-white/90 backdrop-blur-xs z-30 flex flex-col items-center justify-center p-6 text-center space-y-4">
@@ -682,12 +715,27 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
 
                   {/* Split Comparison Slider View */}
                   {viewMode === 'split' && result && originalPreviewUrl ? (
-                    <div className="relative w-full h-full select-none overflow-hidden">
-                      <img
-                        src={result.url}
-                        alt="Cutout"
-                        className="absolute inset-0 w-full h-full object-contain"
-                      />
+                    <div 
+                      className="relative rounded-2xl overflow-hidden shadow-sm max-w-full max-h-[500px] select-none border border-slate-200"
+                      style={{
+                        aspectRatio: imageDims ? `${imageDims.width} / ${imageDims.height}` : 'auto'
+                      }}
+                    >
+                      <div 
+                        className="absolute inset-0 w-full h-full"
+                        style={{
+                          backgroundColor: selectedBgColor !== 'transparent' ? selectedBgColor : undefined
+                        }}
+                      >
+                        {selectedBgColor === 'transparent' && (
+                          <div className="absolute inset-0 bg-checkerboard -z-10" />
+                        )}
+                        <img
+                          src={result.url}
+                          alt="Cutout"
+                          className="absolute inset-0 w-full h-full object-contain"
+                        />
+                      </div>
                       <div 
                         className="absolute inset-0 overflow-hidden"
                         style={{ width: `${sliderPosition}%` }}
@@ -714,31 +762,48 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                       />
                     </div>
                   ) : resultTab === 'removed' ? (
-                    /* Removed Background Result Image */
-                    result ? (
-                      <img
-                        src={result.url}
-                        alt="Background Removed Result"
-                        className="max-h-full max-w-full object-contain"
-                      />
-                    ) : (
-                      originalPreviewUrl && (
+                    /* Removed Background Result Image — Wraps exact image aspect ratio */
+                    <div 
+                      className={`relative rounded-2xl overflow-hidden shadow-sm max-w-full max-h-[500px] flex items-center justify-center transition-all duration-150 border border-slate-200/70 ${
+                        selectedBgColor === 'transparent' ? 'bg-checkerboard' : ''
+                      }`}
+                      style={{
+                        aspectRatio: imageDims ? `${imageDims.width} / ${imageDims.height}` : 'auto',
+                        backgroundColor: selectedBgColor !== 'transparent' ? selectedBgColor : undefined
+                      }}
+                    >
+                      {result ? (
                         <img
-                          src={originalPreviewUrl}
-                          alt="Original Preview"
-                          className="max-h-full max-w-full object-contain opacity-60"
+                          src={result.url}
+                          alt="Background Removed Result"
+                          className="w-full h-full object-contain"
                         />
-                      )
-                    )
+                      ) : (
+                        originalPreviewUrl && (
+                          <img
+                            src={originalPreviewUrl}
+                            alt="Original Preview"
+                            className="w-full h-full object-contain opacity-50"
+                          />
+                        )
+                      )}
+                    </div>
                   ) : (
                     /* Original Image */
-                    originalPreviewUrl && (
-                      <img
-                        src={originalPreviewUrl}
-                        alt="Original"
-                        className="max-h-full max-w-full object-contain"
-                      />
-                    )
+                    <div 
+                      className="relative rounded-2xl overflow-hidden shadow-sm max-w-full max-h-[500px] flex items-center justify-center border border-slate-200/70 bg-white"
+                      style={{
+                        aspectRatio: imageDims ? `${imageDims.width} / ${imageDims.height}` : 'auto'
+                      }}
+                    >
+                      {originalPreviewUrl && (
+                        <img
+                          src={originalPreviewUrl}
+                          alt="Original"
+                          className="w-full h-full object-contain"
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -768,38 +833,80 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
               <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 space-y-5">
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Download Result</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">High-resolution transparent cutout</p>
+                  <p className="text-xs text-slate-500 mt-0.5">High-resolution export with alpha preservation</p>
                 </div>
 
                 <div className="space-y-3">
-                  {/* Primary Download Button */}
-                  <button
-                    type="button"
-                    onClick={handleDownload}
-                    disabled={!result || isProcessing}
-                    className="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-blue-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>
-                      {selectedBgColor !== 'transparent' ? 'Download with Background' : 'Download Transparent PNG'}
-                    </span>
-                  </button>
+                  {/* Download with Selected Background Color (Visible when a background color is chosen) */}
+                  {selectedBgColor !== 'transparent' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (result) handleDownloadWithBg(result.url, selectedBgColor, result.filename);
+                        }}
+                        disabled={!result || isProcessing}
+                        className="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-blue-600/25 transition-all cursor-pointer flex items-center justify-center gap-2.5"
+                      >
+                        <span 
+                          className="w-3.5 h-3.5 rounded-full border border-white/60 shrink-0 shadow-xs" 
+                          style={{ backgroundColor: selectedBgColor }} 
+                        />
+                        <Download className="w-4 h-4" />
+                        <span>Download with Background</span>
+                      </button>
 
-                  {/* HD Download Button */}
-                  <button
-                    type="button"
-                    onClick={handleDownload}
-                    disabled={!result || isProcessing}
-                    className="w-full py-3 px-6 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 text-white font-bold text-xs rounded-2xl shadow-sm transition-all cursor-pointer flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-2">
-                      <FileCheck className="w-4 h-4 text-emerald-400" />
-                      <span>Download HD Full Size</span>
-                    </div>
-                    <span className="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">
-                      {imageDims ? `${imageDims.width} × ${imageDims.height}` : '4K UHD'}
-                    </span>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (result) downloadFile(result.url, result.filename);
+                        }}
+                        disabled={!result || isProcessing}
+                        className="w-full py-3 px-6 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 text-white font-bold text-xs rounded-2xl shadow-sm transition-all cursor-pointer flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileCheck className="w-4 h-4 text-emerald-400" />
+                          <span>Download Transparent PNG</span>
+                        </div>
+                        <span className="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">
+                          {imageDims ? `${imageDims.width} × ${imageDims.height}` : 'HD'}
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {/* Primary Download: Transparent PNG */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (result) downloadFile(result.url, result.filename);
+                        }}
+                        disabled={!result || isProcessing}
+                        className="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-blue-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Download Transparent PNG</span>
+                      </button>
+
+                      {/* Secondary Download: Full Size HD */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (result) downloadFile(result.url, result.filename);
+                        }}
+                        disabled={!result || isProcessing}
+                        className="w-full py-3 px-6 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 text-white font-bold text-xs rounded-2xl shadow-sm transition-all cursor-pointer flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileCheck className="w-4 h-4 text-emerald-400" />
+                          <span>Download HD Full Size</span>
+                        </div>
+                        <span className="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">
+                          {imageDims ? `${imageDims.width} × ${imageDims.height}` : '4K UHD'}
+                        </span>
+                      </button>
+                    </>
+                  )}
 
                   {/* Add to Design Studio Button */}
                   {onBackToStudio && (
@@ -814,8 +921,24 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                   )}
                 </div>
 
+                {/* Reprocess Option when User adjusts Matting */}
+                {result && !isProcessing && (
+                  <div className="pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedFile) executeBackgroundRemoval(selectedFile, modelType, mattingMode);
+                      }}
+                      className="w-full py-2 px-3 bg-blue-50/60 hover:bg-blue-100/70 text-blue-700 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>Re-run with {mattingMode === 'clean' ? 'Balanced' : mattingMode === 'strong' ? 'Strong' : 'Soft'} Matting</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* Upload Another Image */}
-                <div className="pt-4 border-t border-slate-100">
+                <div className="pt-2 border-t border-slate-100">
                   <button
                     type="button"
                     onClick={handleReset}
