@@ -27,11 +27,16 @@ import {
   Zap,
   Clock,
   Gauge,
-  SlidersHorizontal
+  SlidersHorizontal,
+  ArrowLeft
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-export const BackgroundRemoverTool: React.FC = () => {
+interface BackgroundRemoverToolProps {
+  onBackToStudio?: () => void;
+}
+
+export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ onBackToStudio }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [originalPreviewUrl, setOriginalPreviewUrl] = useState<string | null>(null);
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
@@ -310,6 +315,17 @@ export const BackgroundRemoverTool: React.FC = () => {
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset</span>
+            </button>
+          )}
+
+          {onBackToStudio && (
+            <button
+              onClick={onBackToStudio}
+              title="Return to Design Studio Canvas"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Studio</span>
             </button>
           )}
 
@@ -643,7 +659,16 @@ export const BackgroundRemoverTool: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                {onBackToStudio && (
+                  <button
+                    onClick={onBackToStudio}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white text-sm font-bold rounded-xl border border-white/20 transition-all cursor-pointer"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Back to Studio</span>
+                  </button>
+                )}
                 <button
                   onClick={handleDownload}
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all cursor-pointer hover:scale-[1.02]"

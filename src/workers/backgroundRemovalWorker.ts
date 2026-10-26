@@ -62,6 +62,7 @@ async function refineTransparentImage(
     }
 
     // Clean stray background compression noise (alpha <= 4 -> 0)
+    // and solidify high-confidence subject core (alpha >= 252 -> 255)
     // while keeping RGB untouched to eliminate any black outline or discoloration
     const canvas = new OffscreenCanvas(origW, origH);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -84,6 +85,9 @@ async function refineTransparentImage(
         data[i - 1] = 0;
         data[i - 2] = 0;
         data[i - 3] = 0;
+        modified = true;
+      } else if (a >= 252 && a < 255) {
+        data[i] = 255;
         modified = true;
       }
     }

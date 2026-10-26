@@ -269,6 +269,43 @@ export function isAIModelPreloaded(modelType: AIModelType = 'isnet_fp16'): boole
 }
 
 /**
+ * Safely scales down ultra-large images (> 3840px / 4K UHD) to prevent browser memory exhaustion
+ */
+async function prepareOptimizedFile(file: File, maxDim = 3840): Promise<{ file: File; width: number; height: number }> {
+  const { width, height } = await getImageDimensions(file);
+  if (width <= maxDim && height <= maxDim) {
+    return { file, width, height };
+  }
+
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = maxDim / Math.max(bmp.width, bmp.height);
+    const targetW = Math.round(bmp.width * scale);
+    const targetH = Math.round(bmp.height * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      bmp.close();
+      return { file, width, height };
+    }
+
+    ctx.drawImage(bmp, 0, 0, targetW, targetH);
+    bmp.close();
+
+    const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png', 0.95));
+    if (!blob) return { file, width, height };
+
+    const optimized = new File([blob], file.name, { type: 'image/png' });
+    return { file: optimized, width: targetW, height: targetH };
+  } catch {
+    return { file, width, height };
+  }
+}
+
+/**
  * Tool 3: AI-based Background Removal
  * Executes inside dedicated Web Worker to keep UI 100% responsive,
  * applies sub-pixel edge refinement, and preserves 100% original dimensions.
@@ -284,8 +321,8 @@ export async function removeImageBackground(
   const baseName = file.name.replace(/\.[^/.]+$/, '');
   const filename = `${baseName}_no_bg.png`;
 
-  // Zero-copy image dimensions extraction
-  const { width: origWidth, height: origHeight } = await getImageDimensions(file);
+  // Zero-copy image dimensions extraction & 4K memory safety guard
+  const { file: processFile, width: origWidth, height: origHeight } = await prepareOptimizedFile(file);
 
   // 1. External Cloud API (Remove.bg) with granular network diagnostics
   if (customApiKey && customApiKey.trim().length > 10) {
@@ -293,7 +330,7 @@ export async function removeImageBackground(
     const t0 = performance.now();
 
     const formData = new FormData();
-    formData.append('image_file', file);
+    formData.append('image_file', processFile);
     formData.append('size', 'auto');
 
     onProgress?.('Uploading image to Remove.bg...', 35);
@@ -378,7 +415,7 @@ export async function removeImageBackground(
           cleanupListener();
           console.warn('Worker reported error, attempting direct fallback:', e.data.message);
           // Attempt direct fallback
-          runDirectInference(file, modelType, onProgress, startTime, filename, origWidth, origHeight)
+          runDirectInference(processFile, modelType, onProgress, startTime, filename, origWidth, origHeight)
             .then(resolve)
             .catch(reject);
         }
@@ -388,7 +425,7 @@ export async function removeImageBackground(
       worker.postMessage({
         id: taskId,
         type: 'process',
-        file,
+        file: processFile,
         modelType,
         publicPath: getAssetPublicPath(false),
         cleanFringe
@@ -397,7 +434,7 @@ export async function removeImageBackground(
   }
 
   // 3. Direct Fallback if Web Workers unsupported
-  return runDirectInference(file, modelType, onProgress, startTime, filename, origWidth, origHeight);
+  return runDirectInference(processFile, modelType, onProgress, startTime, filename, origWidth, origHeight);
 }
 
 /**
