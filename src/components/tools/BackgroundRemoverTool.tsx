@@ -43,7 +43,7 @@ export const BackgroundRemoverTool: React.FC = () => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
   // Model & Processing Settings
-  const [modelType, setModelType] = useState<AIModelType>('isnet_fp16'); // Default to Precision for best foreground edge accuracy
+  const [modelType, setModelType] = useState<AIModelType>('isnet_quint8'); // Default to Turbo Q8 for lightning speed & clean natural edges
   const [cleanFringe, setCleanFringe] = useState<boolean>(true); // Edge matting post-processing
   const [modelReady, setModelReady] = useState<boolean>(false);
   const [hardwareAccel, setHardwareAccel] = useState<'webgpu' | 'wasm-simd'>('wasm-simd');
@@ -243,7 +243,7 @@ export const BackgroundRemoverTool: React.FC = () => {
             Professional AI Background Remover
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Studio-grade 4K neural segmentation with sub-pixel edge matting, anti-halo color decontamination, and lossless transparent PNG export.
+            Studio-grade neural segmentation with natural sub-pixel edge matting, zero discoloration, and lossless transparent PNG export.
           </p>
         </div>
 
@@ -251,9 +251,22 @@ export const BackgroundRemoverTool: React.FC = () => {
           {/* AI Model Engine Selector */}
           <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
             <button
+              onClick={() => setModelType('isnet_quint8')}
+              disabled={isProcessing}
+              title="Turbo Engine (Recommended): 3x faster, 44MB weights, highly optimized 8-bit quantized SIMD for instant cutouts"
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                modelType === 'isnet_quint8'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              <span>Turbo Q8 (Fast)</span>
+            </button>
+            <button
               onClick={() => setModelType('isnet_fp16')}
               disabled={isProcessing}
-              title="Precision Engine (Recommended): 84MB weights, 16-bit float tensor precision for crisp fine edges, hair, and complex products"
+              title="Precision Engine: 88MB weights, 16-bit float tensor precision for heavy studio work"
               className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                 modelType === 'isnet_fp16'
                   ? 'bg-white text-slate-900 shadow-xs'
@@ -262,25 +275,13 @@ export const BackgroundRemoverTool: React.FC = () => {
             >
               Precision (FP16)
             </button>
-            <button
-              onClick={() => setModelType('isnet_quint8')}
-              disabled={isProcessing}
-              title="Turbo Engine: 2x faster, 42MB weights, highly optimized 8-bit quantized SIMD"
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                modelType === 'isnet_quint8'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Turbo (Q8)
-            </button>
           </div>
 
           {/* Edge Matting Cleanup Toggle */}
           <button
             onClick={() => setCleanFringe(!cleanFringe)}
             disabled={isProcessing}
-            title="4K Edge Matting eliminates background color bleed (halos) while preserving fine hair"
+            title="Clean Edge Matting eliminates background noise while preserving fine hair and natural boundaries"
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
               cleanFringe
                 ? 'bg-red-50 text-red-700 border-red-200 shadow-2xs'
@@ -288,7 +289,7 @@ export const BackgroundRemoverTool: React.FC = () => {
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>{cleanFringe ? '4K Matting & De-Halo: ON' : '4K Matting: OFF'}</span>
+            <span>{cleanFringe ? 'Edge Matting: Clean' : 'Edge Matting: Off'}</span>
           </button>
 
           {isProcessing && (

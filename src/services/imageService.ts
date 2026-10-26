@@ -116,7 +116,7 @@ export function getAssetPublicPath(useCdnFallback = false): string {
  * Generates rock-solid model configuration for direct / fallback execution
  */
 export function getModelConfig(
-  modelType: AIModelType = 'isnet_fp16', 
+  modelType: AIModelType = 'isnet_quint8', 
   onProgress?: ProgressCallback,
   useCdnFallback = false
 ): Config {
@@ -201,7 +201,7 @@ export function cancelBackgroundRemoval(): void {
  * Strictly uses activePreloadPromise mutex to eliminate duplicate React StrictMode loads.
  */
 export async function preloadAIModel(
-  modelType: AIModelType = 'isnet_fp16',
+  modelType: AIModelType = 'isnet_quint8',
   onProgress?: (step: string, pct: number) => void
 ): Promise<void> {
   if (preloadedModelType === modelType) {
@@ -277,7 +277,7 @@ export async function removeImageBackground(
   file: File,
   onProgress?: ProgressCallback,
   customApiKey?: string,
-  modelType: AIModelType = 'isnet_fp16',
+  modelType: AIModelType = 'isnet_quint8',
   cleanFringe: boolean = true
 ): Promise<ImageConversionResult> {
   const startTime = performance.now();
