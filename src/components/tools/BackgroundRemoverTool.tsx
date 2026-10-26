@@ -1,40 +1,82 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   removeImageBackground, 
-  preloadAIModel,
-  isAIModelPreloaded,
-  detectHardwareAcceleration,
-  getImageDimensions,
-  cancelBackgroundRemoval,
+  preloadAIModel, 
+  isAIModelPreloaded, 
+  detectHardwareAcceleration, 
+  getImageDimensions, 
+  cancelBackgroundRemoval, 
   downloadFile, 
   formatBytes, 
-  type ImageConversionResult,
-  type AIModelType
+  type ImageConversionResult, 
+  type AIModelType 
 } from '../../services/imageService';
 import { 
+  Upload, 
   Download, 
-  RotateCcw, 
   Sparkles, 
-  Cpu, 
   Check, 
   AlertCircle, 
-  Key, 
   KeyRound, 
   X, 
   FileCheck, 
   Split, 
-  Image as ImageIcon,
-  Zap,
-  Clock,
-  Gauge,
-  SlidersHorizontal,
-  ArrowLeft
+  Zap, 
+  SlidersHorizontal, 
+  ArrowLeft, 
+  Palette, 
+  Eye, 
+  Plus 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface BackgroundRemoverToolProps {
   onBackToStudio?: () => void;
 }
+
+const SAMPLE_IMAGES = [
+  {
+    id: 'portrait',
+    label: 'People / Hair',
+    tag: 'Fine Hair',
+    url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
+    thumb: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=160&q=70',
+  },
+  {
+    id: 'product',
+    label: 'Products',
+    tag: 'Crisp Outlines',
+    url: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=80',
+    thumb: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=160&q=70',
+  },
+  {
+    id: 'animal',
+    label: 'Animals / Fur',
+    tag: 'Soft Fur',
+    url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=800&q=80',
+    thumb: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=160&q=70',
+  },
+  {
+    id: 'car',
+    label: 'Cars / Objects',
+    tag: 'Complex Shape',
+    url: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=800&q=80',
+    thumb: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=160&q=70',
+  }
+];
+
+const BG_COLOR_PRESETS = [
+  { id: 'transparent', label: 'Transparent', value: 'transparent' },
+  { id: 'white', label: 'White', value: '#ffffff' },
+  { id: 'offwhite', label: 'Off White', value: '#f8fafc' },
+  { id: 'black', label: 'Midnight', value: '#0f172a' },
+  { id: 'red', label: 'Coral Red', value: '#ef4444' },
+  { id: 'blue', label: 'Ocean Blue', value: '#2563eb' },
+  { id: 'green', label: 'Emerald', value: '#10b981' },
+  { id: 'yellow', label: 'Amber', value: '#f59e0b' },
+  { id: 'purple', label: 'Lavender', value: '#8b5cf6' },
+  { id: 'pink', label: 'Rose Pink', value: '#ec4899' },
+];
 
 export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ onBackToStudio }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -47,16 +89,20 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
+  // Remove.bg result view state
+  const [resultTab, setResultTab] = useState<'removed' | 'original'>('removed');
+  const [isEditingBg, setIsEditingBg] = useState<boolean>(false);
+  const [selectedBgColor, setSelectedBgColor] = useState<string>('transparent');
+  const [customColor, setCustomColor] = useState<string>('#ffffff');
+  const [viewMode, setViewMode] = useState<'single' | 'split'>('single');
+  const [sliderPosition, setSliderPosition] = useState<number>(50);
+
   // Model & Processing Settings
-  const [modelType, setModelType] = useState<AIModelType>('isnet_quint8'); // Default to Turbo Q8 for lightning speed & clean natural edges
-  const [cleanFringe, setCleanFringe] = useState<boolean>(true); // Edge matting post-processing
+  const [modelType, setModelType] = useState<AIModelType>('isnet_quint8');
+  const [cleanFringe, setCleanFringe] = useState<boolean>(true);
   const [modelReady, setModelReady] = useState<boolean>(false);
   const [hardwareAccel, setHardwareAccel] = useState<'webgpu' | 'wasm-simd'>('wasm-simd');
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
-
-  // View mode: 'side-by-side' or 'split'
-  const [viewMode, setViewMode] = useState<'side-by-side' | 'split'>('side-by-side');
-  const [sliderPosition, setSliderPosition] = useState<number>(50);
 
   // Optional Remove.bg API Key modal
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
@@ -79,9 +125,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
       setModelReady(true);
     } else {
       preloadAIModel(modelType, (step) => {
-        if (isMounted) {
-          setProgressStatus(step);
-        }
+        if (isMounted) setProgressStatus(step);
       }).then(() => {
         if (isMounted) setModelReady(true);
       }).catch((err) => {
@@ -95,18 +139,37 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
     };
   }, [modelType]);
 
+  // 2. Global Clipboard Paste Listener (Ctrl + V anywhere on page — just like remove.bg!)
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (isProcessing) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            handleFileSelect(file);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isProcessing]);
+
   const handleFileSelect = async (file: File) => {
-    if (isProcessing) return; // Prevent duplicate concurrent requests
+    if (isProcessing) return;
     setErrorMessage(null);
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     const extension = file.name.split('.').pop()?.toLowerCase();
 
-    if (!validTypes.includes(file.type) && !['jpg', 'jpeg', 'png'].includes(extension || '')) {
-      setErrorMessage('Please upload a valid JPG, JPEG, or PNG image file.');
+    if (!validTypes.includes(file.type) && !['jpg', 'jpeg', 'png', 'webp'].includes(extension || '')) {
+      setErrorMessage('Please upload a valid JPG, PNG, or WebP image file.');
       return;
     }
 
-    // Clean up previous URLs
     if (originalPreviewUrl) URL.revokeObjectURL(originalPreviewUrl);
     if (result) URL.revokeObjectURL(result.url);
 
@@ -114,14 +177,31 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
     const previewUrl = URL.createObjectURL(file);
     setOriginalPreviewUrl(previewUrl);
     setResult(null);
+    setResultTab('removed');
+    setSelectedBgColor('transparent');
+    setIsEditingBg(false);
 
-    // Read dimensions via zero-copy fast inspector immediately
     getImageDimensions(file).then(dims => {
       setImageDims(dims);
     }).catch(() => {});
 
-    // Launch background removal pipeline
     executeBackgroundRemoval(file);
+  };
+
+  const handleSampleClick = async (sample: typeof SAMPLE_IMAGES[0]) => {
+    if (isProcessing) return;
+    try {
+      setIsProcessing(true);
+      setProgressStatus('Loading sample image...');
+      setProgressPercent(10);
+      const res = await fetch(sample.url);
+      const blob = await res.blob();
+      const file = new File([blob], `${sample.id}.jpg`, { type: 'image/jpeg' });
+      handleFileSelect(file);
+    } catch {
+      setErrorMessage('Could not fetch sample image. Please upload an image from your computer.');
+      setIsProcessing(false);
+    }
   };
 
   const handleCancel = () => {
@@ -136,7 +216,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
     setIsProcessing(true);
     setErrorMessage(null);
     setProgressPercent(15);
-    setProgressStatus(modelReady ? 'Reusing preloaded neural model...' : 'Loading neural network weights...');
+    setProgressStatus('Preparing neural segmentation tensor...');
     setElapsedSeconds(0);
 
     const startTime = Date.now();
@@ -158,22 +238,18 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
 
       setResult(output);
       setModelReady(true);
-      if (output.stageTimings) {
-        console.log('⚡ INFYUM DESIGN — AI Background Removal Stage Timings:');
-        console.table(output.stageTimings);
-      }
       confetti({
         particleCount: 50,
         spread: 70,
         origin: { y: 0.8 },
-        colors: ['#dc2626', '#3b82f6', '#10b981', '#ffffff']
+        colors: ['#2563eb', '#38bdf8', '#10b981', '#ffffff']
       });
     } catch (err: any) {
       if (err.message && err.message.includes('cancelled by user')) {
         setErrorMessage('Background removal was cancelled.');
       } else {
         console.error('Background removal failure:', err);
-        setErrorMessage(err.message || 'Background removal process failed. Please try again.');
+        setErrorMessage(err.message || 'Background removal process failed. Please check your image and try again.');
       }
     } finally {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -191,9 +267,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
   };
 
   const handleReset = () => {
-    if (isProcessing) {
-      handleCancel();
-    }
+    if (isProcessing) handleCancel();
     if (originalPreviewUrl) URL.revokeObjectURL(originalPreviewUrl);
     if (result) URL.revokeObjectURL(result.url);
     setSelectedFile(null);
@@ -202,12 +276,42 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
     setResult(null);
     setErrorMessage(null);
     setIsProcessing(false);
+    setSelectedBgColor('transparent');
+    setIsEditingBg(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleDownload = () => {
     if (!result) return;
+    // If a custom background color was selected, composite and download
+    if (selectedBgColor !== 'transparent') {
+      handleDownloadWithBg(result.url, selectedBgColor, result.filename);
+      return;
+    }
     downloadFile(result.url, result.filename);
+  };
+
+  const handleDownloadWithBg = (transparentUrl: string, bgColor: string, filename: string) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          downloadFile(url, filename.replace('.png', `_${bgColor.replace('#', '')}.png`));
+          setTimeout(() => URL.revokeObjectURL(url), 3000);
+        }
+      }, 'image/png');
+    };
+    img.src = transparentUrl;
   };
 
   const handleSaveApiKey = (key: string) => {
@@ -218,63 +322,41 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6">
-      {/* Tool Header */}
-      <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-50 text-red-700 border border-red-200">
-              <Cpu className="w-3.5 h-3.5 text-red-600" /> 4K Ultra-HD AI Engine
-            </span>
+      {/* Top Header Bar */}
+      <div className="flex items-center justify-between pb-2">
+        {onBackToStudio ? (
+          <button
+            onClick={onBackToStudio}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl shadow-xs transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4 text-slate-600" />
+            <span>Back to Design Studio</span>
+          </button>
+        ) : <div />}
 
-            {/* Model Ready Badge */}
-            {modelReady ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 animate-in fade-in">
-                <Zap className="w-3 h-3 text-emerald-600" /> Model Ready in Memory
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                <Clock className="w-3 h-3 text-amber-600 animate-spin" /> Preloading AI Model...
-              </span>
-            )}
-
-            {/* Hardware Acceleration Badge */}
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-              <Gauge className="w-3 h-3 text-slate-500" />
-              ⚡ Local Neural Engine ({hardwareAccel === 'webgpu' ? 'WebGPU' : 'WASM SIMD'})
-            </span>
-          </div>
-
-          <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
-            Professional AI Background Remover
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Studio-grade neural segmentation with natural sub-pixel edge matting, zero discoloration, and lossless transparent PNG export.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
-          {/* AI Model Engine Selector */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+        <div className="flex items-center gap-2">
+          {/* Engine Selector */}
+          <div className="flex items-center p-1 bg-white border border-slate-200 rounded-xl text-xs font-bold shadow-xs">
             <button
               onClick={() => setModelType('isnet_quint8')}
               disabled={isProcessing}
-              title="Turbo Engine (Recommended): 3x faster, 44MB weights, highly optimized 8-bit quantized SIMD for instant cutouts"
+              title="Turbo Q8 (Recommended): 3x faster, 44MB weights, optimized SIMD"
               className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                 modelType === 'isnet_quint8'
-                  ? 'bg-white text-slate-900 shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Zap className="w-3.5 h-3.5 text-amber-500" />
-              <span>Turbo Q8 (Fast)</span>
+              <Zap className="w-3.5 h-3.5 text-amber-300" />
+              <span>Turbo Q8</span>
             </button>
             <button
               onClick={() => setModelType('isnet_fp16')}
               disabled={isProcessing}
-              title="Precision Engine: 88MB weights, 16-bit float tensor precision for heavy studio work"
+              title="Studio Precision FP16: 88MB float16 weights"
               className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                 modelType === 'isnet_fp16'
-                  ? 'bg-white text-slate-900 shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -282,67 +364,40 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
             </button>
           </div>
 
-          {/* Edge Matting Cleanup Toggle */}
+          {/* Edge Matting Toggle */}
           <button
             onClick={() => setCleanFringe(!cleanFringe)}
             disabled={isProcessing}
-            title="Clean Edge Matting eliminates background noise while preserving fine hair and natural boundaries"
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+            title="Clean Edge Matting eliminates background noise while preserving fine hair"
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
               cleanFringe
-                ? 'bg-red-50 text-red-700 border-red-200 shadow-2xs'
-                : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
+                ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-2xs'
+                : 'bg-white text-slate-500 border-slate-200'
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>{cleanFringe ? 'Edge Matting: Clean' : 'Edge Matting: Off'}</span>
+            <span className="hidden sm:inline">{cleanFringe ? 'Matting: Clean' : 'Matting: Off'}</span>
           </button>
 
-          {isProcessing && (
-            <button
-              onClick={handleCancel}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-red-300 bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs animate-in fade-in"
-              title="Cancel current background removal"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Cancel</span>
-            </button>
-          )}
-
-          {selectedFile && !isProcessing && (
-            <button
-              onClick={handleReset}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
-          )}
-
-          {onBackToStudio && (
-            <button
-              onClick={onBackToStudio}
-              title="Return to Design Studio Canvas"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Studio</span>
-            </button>
+          {modelReady && (
+            <span className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <Check className="w-3 h-3 text-emerald-600" />
+              <span>Ready ({hardwareAccel === 'webgpu' ? 'WebGPU' : 'WASM'})</span>
+            </span>
           )}
 
           <button
             onClick={() => setShowKeyModal(true)}
-            title="Configure optional Remove.bg API key"
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+            title="Configure Remove.bg API key"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <KeyRound className="w-3.5 h-3.5 text-slate-500" />
-            <span className="hidden sm:inline">
-              {apiKey ? 'Cloud API Active' : 'API Key'}
-            </span>
+            <span className="hidden sm:inline">{apiKey ? 'API Active' : 'API Key'}</span>
           </button>
         </div>
       </div>
 
-      {/* Error banner */}
+      {/* Error Notice */}
       {errorMessage && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3 text-red-800 text-sm animate-in fade-in duration-200">
           <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
@@ -350,335 +405,440 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
         </div>
       )}
 
-      {/* Upload Zone (shown when no file is selected) */}
+      {/* Hero Upload View (Remove.bg identical layout when no file is chosen) */}
       {!selectedFile && (
-        <div
-          onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          onClick={() => { if (!isProcessing) fileInputRef.current?.click(); }}
-          className={`bg-white border-2 border-dashed rounded-3xl p-12 md:p-16 text-center cursor-pointer transition-all duration-200 group ${
-            isDragging 
-              ? 'border-red-600 bg-red-50/50 scale-[1.01]' 
-              : 'border-slate-300 hover:border-red-500 hover:bg-slate-50/60'
-          }`}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-            disabled={isProcessing}
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files && e.target.files[0]) {
-                handleFileSelect(e.target.files[0]);
-              }
-            }}
-          />
-
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-red-50 text-red-700 border border-red-100 flex items-center justify-center group-hover:scale-110 group-hover:bg-red-700 group-hover:text-white transition-all shadow-sm">
-            <Sparkles className="w-7 h-7" />
+        <div className="space-y-6">
+          <div className="text-center pt-4 pb-2">
+            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-widest bg-blue-50 text-blue-700 border border-blue-200 mb-3">
+              100% Automatically and Free
+            </span>
+            <h1 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tight">
+              Remove Image Background
+            </h1>
+            <p className="text-slate-500 text-sm md:text-base mt-2 max-w-xl mx-auto">
+              Drop an image, paste from clipboard (<kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-slate-700 font-mono text-xs">Ctrl + V</kbd>), or try one of the samples below.
+            </p>
           </div>
 
-          <h3 className="text-lg font-bold text-slate-900 group-hover:text-red-700 transition-colors">
-            Drop any image to remove background
-          </h3>
-          <p className="text-xs text-slate-500 mt-1.5 max-w-md mx-auto">
-            Supports JPG, JPEG, and PNG. Model preloading and WebGPU/WASM acceleration deliver high-speed, crisp edge isolation with zero server uploads.
-          </p>
+          {/* Remove.bg Iconic Upload Box */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            className={`bg-white rounded-3xl p-10 md:p-14 text-center border-2 border-dashed transition-all duration-200 shadow-sm ${
+              isDragging 
+                ? 'border-blue-600 bg-blue-50/60 scale-[1.01]' 
+                : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50/50'
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+              disabled={isProcessing}
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleFileSelect(e.target.files[0]);
+                }
+              }}
+            />
 
-          <div className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
-            <ImageIcon className="w-4 h-4" />
-            <span>Select Image File</span>
+            <div className="max-w-md mx-auto space-y-4">
+              {/* Big Remove.bg Blue Upload Button */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isProcessing}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-10 py-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-extrabold text-lg rounded-full shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+              >
+                <Upload className="w-6 h-6 shrink-0" />
+                <span>Upload Image</span>
+              </button>
+
+              <p className="text-xs text-slate-500">
+                or drop a file, paste image (<kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded text-[11px] font-mono">Ctrl + V</kbd>)
+              </p>
+
+              <div className="pt-2 text-[11px] text-slate-400 flex items-center justify-center gap-2">
+                <span>Supports JPG, PNG, WebP</span>
+                <span>•</span>
+                <span>Up to 4K Ultra-HD</span>
+                <span>•</span>
+                <span>Private & Secure</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Sample Images Row ("No image? Try one of these:") */}
+          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                No image? Try one of these:
+              </span>
+              <span className="text-[11px] text-slate-400">Click to test instant removal</span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {SAMPLE_IMAGES.map((sample) => (
+                <button
+                  key={sample.id}
+                  type="button"
+                  onClick={() => handleSampleClick(sample)}
+                  disabled={isProcessing}
+                  className="group relative rounded-2xl overflow-hidden border border-slate-200 hover:border-blue-500 bg-slate-50 transition-all cursor-pointer text-left shadow-2xs hover:shadow-md hover:-translate-y-0.5"
+                >
+                  <div className="aspect-4/3 w-full overflow-hidden bg-slate-200">
+                    <img 
+                      src={sample.thumb} 
+                      alt={sample.label}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      loading="lazy"
+                    />
+                  </div>
+                  <div className="p-2.5 bg-white">
+                    <p className="text-xs font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
+                      {sample.label}
+                    </p>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      {sample.tag}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Main Workspace: Always shows Original Image Immediately after upload! */}
+      {/* Main Result Workspace (Identical layout to remove.bg) */}
       {selectedFile && (
         <div className="space-y-6 animate-in fade-in duration-300">
-          {/* Top Control Bar */}
-          <div className="flex flex-wrap items-center justify-between bg-white rounded-2xl px-5 py-3 border border-slate-200/80 shadow-2xs gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">View Mode:</span>
-              <button
-                onClick={() => setViewMode('side-by-side')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  viewMode === 'side-by-side'
-                    ? 'bg-red-700 text-white shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                Side by Side
-              </button>
-              <button
-                onClick={() => setViewMode('split')}
-                disabled={!result}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  viewMode === 'split'
-                    ? 'bg-red-700 text-white shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed'
-                }`}
-              >
-                <Split className="w-3.5 h-3.5" />
-                <span>Split Slider</span>
-              </button>
-            </div>
-
-            {/* Status indicators */}
-            <div className="flex items-center gap-2 text-xs">
-              {isProcessing ? (
-                <span className="font-mono font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-md flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 animate-spin" />
-                  <span>Processing... {elapsedSeconds}s</span>
-                </span>
-              ) : result ? (
-                <span className="font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Done in {((result.processingTimeMs || 0) / 1000).toFixed(2)}s ({result.accelerationMode})</span>
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          {/* Side by Side View */}
-          {viewMode === 'side-by-side' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Original Image Card (Displayed immediately on upload!) */}
-              <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200/80 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Original Image
-                    </span>
-                    <span className="text-xs font-bold px-2.5 py-0.5 bg-slate-100 text-slate-700 rounded-md">
-                      {formatBytes(selectedFile.size)}
-                    </span>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* Left 8 Columns: Main Image Canvas Area */}
+            <div className="lg:col-span-8 bg-white rounded-3xl p-5 shadow-sm border border-slate-200/80 flex flex-col justify-between">
+              <div>
+                {/* Top Toolbar: Tabs (Removed Background vs Original) & Edit Background */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-4">
+                  {/* Remove.bg Iconic Top Tabs */}
+                  <div className="flex items-center p-1 bg-slate-100 rounded-xl text-xs font-bold border border-slate-200/80">
+                    <button
+                      type="button"
+                      onClick={() => { setResultTab('removed'); setViewMode('single'); }}
+                      className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                        resultTab === 'removed' && viewMode === 'single'
+                          ? 'bg-white text-blue-600 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Removed Background</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setResultTab('original'); setViewMode('single'); }}
+                      className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                        resultTab === 'original' && viewMode === 'single'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Original</span>
+                    </button>
                   </div>
 
-                  <div className="aspect-4/3 w-full bg-slate-100 rounded-2xl overflow-hidden flex items-center justify-center relative border border-slate-200">
-                    {originalPreviewUrl && (
-                      <img
-                        src={originalPreviewUrl}
-                        alt="Original uploaded"
-                        className="max-h-full max-w-full object-contain"
-                      />
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-600 flex items-center justify-between">
-                  <span className="truncate max-w-[200px] font-medium">{selectedFile.name}</span>
-                  <div className="text-slate-500 font-mono flex items-center gap-1.5">
-                    {imageDims && (imageDims.width >= 3840 || imageDims.height >= 2160) && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-black tracking-wide border border-purple-200">
-                        4K UHD
-                      </span>
-                    )}
-                    <span>{imageDims ? `${imageDims.width} × ${imageDims.height} px` : 'Analyzing...'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Background Removed Result Card */}
-              <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200/80 flex flex-col justify-between relative overflow-hidden">
-                <div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-                    <span className="text-xs font-bold uppercase tracking-wider text-red-700 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-red-600" />
-                      Isolated Subject (Checkerboard)
-                    </span>
+                  <div className="flex items-center gap-2">
+                    {/* Split Comparison Toggle */}
                     {result && (
-                      <span className="text-xs font-bold px-2.5 py-0.5 bg-red-50 text-red-700 border border-red-200 rounded-md">
-                        {formatBytes(result.outputSize)}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode(viewMode === 'split' ? 'single' : 'split')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          viewMode === 'split'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-2xs'
+                            : 'bg-white text-slate-600 border-slate-200 hover:text-slate-900'
+                        }`}
+                      >
+                        <Split className="w-3.5 h-3.5" />
+                        <span>Compare Slider</span>
+                      </button>
+                    )}
+
+                    {/* Edit Background Button (Remove.bg style) */}
+                    {result && viewMode === 'single' && resultTab === 'removed' && (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingBg(!isEditingBg)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          isEditingBg
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <Palette className="w-3.5 h-3.5" />
+                        <span>Edit Background</span>
+                      </button>
                     )}
                   </div>
+                </div>
 
-                  <div className="aspect-4/3 w-full bg-checkerboard rounded-2xl overflow-hidden flex items-center justify-center relative border border-slate-200">
-                    {/* Active Processing Glassmorphism Overlay */}
-                    {isProcessing && (
-                      <div className="absolute inset-0 bg-white/85 backdrop-blur-xs z-20 flex flex-col items-center justify-center p-6 text-center space-y-4">
-                        <div className="relative w-16 h-16 flex items-center justify-center">
-                          <div className="absolute inset-0 rounded-full border-4 border-red-200" />
-                          <div className="absolute inset-0 rounded-full border-4 border-red-700 border-t-transparent animate-spin" />
-                          <Cpu className="w-6 h-6 text-red-700 animate-pulse" />
-                        </div>
+                {/* Inline Background Color Palette (Shown when Edit Background is active) */}
+                {isEditingBg && result && (
+                  <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700">Choose Background Color:</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBgColor('transparent')}
+                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                      >
+                        Reset to Transparent
+                      </button>
+                    </div>
 
-                        <div>
-                          <h4 className="text-sm font-bold text-slate-900">Neural Segmentation Active</h4>
-                          <p className="text-xs text-slate-500 mt-1 max-w-[250px]">{progressStatus}</p>
-                        </div>
-
-                        {/* Progress Bar */}
-                        <div className="w-48 bg-slate-200 rounded-full h-2 overflow-hidden border border-slate-300">
-                          <div 
-                            className="bg-gradient-to-r from-red-600 to-red-800 h-full rounded-full transition-all duration-200"
-                            style={{ width: `${progressPercent}%` }}
-                          />
-                        </div>
-
-                        <div className="flex items-center gap-2 text-[11px] font-mono text-slate-600">
-                          <span className="font-bold text-red-700">{progressPercent}%</span>
-                          <span>•</span>
-                          <span>{elapsedSeconds}s elapsed</span>
-                        </div>
-
+                    <div className="flex flex-wrap items-center gap-2">
+                      {BG_COLOR_PRESETS.map((preset) => (
                         <button
+                          key={preset.id}
                           type="button"
-                          onClick={handleCancel}
-                          className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 bg-red-100 hover:bg-red-200 text-red-800 border border-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs hover:scale-105"
+                          onClick={() => setSelectedBgColor(preset.value)}
+                          className={`w-8 h-8 rounded-xl border-2 transition-transform cursor-pointer flex items-center justify-center ${
+                            selectedBgColor === preset.value
+                              ? 'border-blue-600 scale-110 shadow-sm'
+                              : 'border-slate-200 hover:border-slate-400'
+                          } ${preset.value === 'transparent' ? 'bg-checkerboard' : ''}`}
+                          style={preset.value !== 'transparent' ? { backgroundColor: preset.value } : {}}
+                          title={preset.label}
                         >
-                          <X className="w-3.5 h-3.5 text-red-700" />
-                          <span>Cancel Processing</span>
+                          {selectedBgColor === preset.value && (
+                            <Check className={`w-4 h-4 ${preset.value === '#ffffff' || preset.value === '#f8fafc' || preset.value === 'transparent' ? 'text-slate-900' : 'text-white'}`} />
+                          )}
                         </button>
-                      </div>
-                    )}
+                      ))}
 
-                    {/* Result image once ready */}
-                    {result ? (
+                      {/* Custom Color Input */}
+                      <div className="relative inline-flex items-center">
+                        <input
+                          type="color"
+                          value={customColor}
+                          onChange={(e) => {
+                            setCustomColor(e.target.value);
+                            setSelectedBgColor(e.target.value);
+                          }}
+                          className="w-8 h-8 rounded-xl cursor-pointer border border-slate-200 p-0 overflow-hidden"
+                          title="Custom Hex Color"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Main Preview Container */}
+                <div 
+                  className={`aspect-4/3 w-full rounded-2xl overflow-hidden flex items-center justify-center relative border border-slate-200 transition-colors ${
+                    selectedBgColor === 'transparent' ? 'bg-checkerboard' : ''
+                  }`}
+                  style={selectedBgColor !== 'transparent' ? { backgroundColor: selectedBgColor } : {}}
+                >
+                  {/* Processing Overlay */}
+                  {isProcessing && (
+                    <div className="absolute inset-0 bg-white/90 backdrop-blur-xs z-30 flex flex-col items-center justify-center p-6 text-center space-y-4">
+                      <div className="relative w-16 h-16 flex items-center justify-center">
+                        <div className="absolute inset-0 rounded-full border-4 border-blue-200" />
+                        <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin" />
+                        <Sparkles className="w-6 h-6 text-blue-600 animate-pulse" />
+                      </div>
+
+                      <div>
+                        <h4 className="text-base font-bold text-slate-900">Removing Background...</h4>
+                        <p className="text-xs text-slate-500 mt-1 max-w-[280px]">{progressStatus}</p>
+                      </div>
+
+                      <div className="w-52 bg-slate-200 rounded-full h-2 overflow-hidden border border-slate-300">
+                        <div 
+                          className="bg-blue-600 h-full rounded-full transition-all duration-200"
+                          style={{ width: `${progressPercent}%` }}
+                        />
+                      </div>
+
+                      <div className="text-[11px] font-mono text-slate-600">
+                        <span className="font-bold text-blue-600">{progressPercent}%</span>
+                        <span className="mx-1.5">•</span>
+                        <span>{elapsedSeconds}s</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleCancel}
+                        className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-red-50 hover:text-red-700 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Cancel</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Split Comparison Slider View */}
+                  {viewMode === 'split' && result && originalPreviewUrl ? (
+                    <div className="relative w-full h-full select-none overflow-hidden">
+                      <img
+                        src={result.url}
+                        alt="Cutout"
+                        className="absolute inset-0 w-full h-full object-contain"
+                      />
+                      <div 
+                        className="absolute inset-0 overflow-hidden"
+                        style={{ width: `${sliderPosition}%` }}
+                      >
+                        <img
+                          src={originalPreviewUrl}
+                          alt="Original"
+                          className="absolute inset-0 w-full h-full object-contain max-w-none"
+                          style={{ width: '100%', height: '100%' }}
+                        />
+                        <div className="absolute top-0 right-0 bottom-0 w-1 bg-blue-600 shadow-md cursor-ew-resize">
+                          <div className="absolute top-1/2 -translate-y-1/2 -left-3.5 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shadow-lg">
+                            ↔
+                          </div>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={sliderPosition}
+                        onChange={(e) => setSliderPosition(parseFloat(e.target.value))}
+                        className="absolute inset-0 opacity-0 cursor-ew-resize w-full h-full z-20"
+                      />
+                    </div>
+                  ) : resultTab === 'removed' ? (
+                    /* Removed Background Result Image */
+                    result ? (
                       <img
                         src={result.url}
                         alt="Background Removed Result"
                         className="max-h-full max-w-full object-contain"
                       />
-                    ) : !isProcessing ? (
-                      <span className="text-xs text-slate-400">Waiting to begin...</span>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-600 flex items-center justify-between">
-                  {result ? (
-                    <>
-                      <span className="font-semibold text-slate-800">{result.filename}</span>
-                      <div className="text-emerald-700 font-bold font-mono flex items-center gap-1.5">
-                        {(result.width >= 3840 || result.height >= 2160) && (
-                          <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-black tracking-wide border border-purple-200">
-                            4K UHD
-                          </span>
-                        )}
-                        <span>{result.width} × {result.height} px (100% Original)</span>
-                      </div>
-                    </>
+                    ) : (
+                      originalPreviewUrl && (
+                        <img
+                          src={originalPreviewUrl}
+                          alt="Original Preview"
+                          className="max-h-full max-w-full object-contain opacity-60"
+                        />
+                      )
+                    )
                   ) : (
-                    <span className="text-slate-400">{isProcessing ? 'Processing image tensor...' : 'Ready'}</span>
+                    /* Original Image */
+                    originalPreviewUrl && (
+                      <img
+                        src={originalPreviewUrl}
+                        alt="Original"
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    )
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom Image Dimensions Bar */}
+              <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+                <span className="truncate max-w-[200px] font-medium">{selectedFile.name}</span>
+                <div className="font-mono flex items-center gap-2">
+                  {imageDims && (
+                    <span>{imageDims.width} × {imageDims.height} px</span>
+                  )}
+                  {result && (
+                    <>
+                      <span>•</span>
+                      <span>{formatBytes(result.outputSize)}</span>
+                      <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        ✓ Done in {((result.processingTimeMs || 0) / 1000).toFixed(2)}s
+                      </span>
+                    </>
                   )}
                 </div>
               </div>
             </div>
-          )}
 
-          {/* Interactive Split Slider View */}
-          {viewMode === 'split' && result && originalPreviewUrl && (
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200/80">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Interactive Before & After Comparison
-                </span>
-                <span className="text-xs text-slate-400">
-                  Drag the slider horizontally to inspect fine edge boundaries
-                </span>
-              </div>
-
-              <div className="relative aspect-16/9 w-full bg-checkerboard rounded-2xl overflow-hidden border border-slate-200 select-none">
-                {/* Result layer (Full transparent background) */}
-                <img
-                  src={result.url}
-                  alt="Transparent result"
-                  className="absolute inset-0 w-full h-full object-contain"
-                />
-
-                {/* Original clipped layer */}
-                <div 
-                  className="absolute inset-0 overflow-hidden"
-                  style={{ width: `${sliderPosition}%` }}
-                >
-                  <img
-                    src={originalPreviewUrl}
-                    alt="Original"
-                    className="absolute inset-0 w-full h-full object-contain max-w-none"
-                    style={{ width: '100%', height: '100%' }}
-                  />
-                  {/* Divider line */}
-                  <div className="absolute top-0 right-0 bottom-0 w-1 bg-red-600 shadow-lg cursor-ew-resize">
-                    <div className="absolute top-1/2 -translate-y-1/2 -left-3 w-7 h-7 rounded-full bg-red-700 text-white flex items-center justify-center text-[10px] font-bold shadow-md">
-                      ↔
-                    </div>
-                  </div>
-                </div>
-
-                {/* Slider Input overlay */}
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={sliderPosition}
-                  onChange={(e) => setSliderPosition(parseFloat(e.target.value))}
-                  className="absolute inset-0 opacity-0 cursor-ew-resize w-full h-full z-10"
-                />
-              </div>
-
-              <div className="flex justify-between items-center text-xs font-bold text-slate-500 mt-3 px-2">
-                <span>← Original Photo</span>
-                <span>Transparent Background →</span>
-              </div>
-            </div>
-          )}
-
-          {/* Action Bar / Download Banner */}
-          {result && (
-            <div className="bg-gradient-to-r from-red-950 via-red-900 to-slate-900 rounded-3xl p-6 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl shadow-red-950/20">
-              <div className="flex items-center gap-4 text-left">
-                <div className="p-3 bg-white/10 rounded-2xl border border-white/10 shrink-0">
-                  <FileCheck className="w-6 h-6 text-red-400" />
-                </div>
+            {/* Right 4 Columns: Actions & Download (Identical to remove.bg) */}
+            <div className="lg:col-span-4 space-y-4">
+              <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 space-y-5">
                 <div>
-                  <h4 className="text-base font-bold text-white">4K Lossless Transparent PNG Ready</h4>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Original dimensions preserved: {result.width} × {result.height} px • {formatBytes(result.outputSize)} • Processed in {((result.processingTimeMs || 0) / 1000).toFixed(2)}s
-                  </p>
-                  {result.stageTimings && (
-                    <div className="text-[11px] text-slate-300 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                      {result.stageTimings.uploadMs !== undefined ? (
-                        <span>API timings: Upload {result.stageTimings.uploadMs}ms • API {result.stageTimings.apiResponseMs}ms • Download {result.stageTimings.downloadMs}ms</span>
-                      ) : (
-                        <>
-                          <span className="font-mono text-emerald-300 font-bold">Stage Diagnostics:</span>
-                          <span>Model Load: {result.stageTimings.modelInitMs || 0}ms</span>
-                          <span>•</span>
-                          <span>Decode: {result.stageTimings.imageDecodeMs || 0}ms</span>
-                          <span>•</span>
-                          <span className="font-semibold text-white">Inference: {result.stageTimings.inferenceMs || 0}ms</span>
-                          <span>•</span>
-                          <span>Compositing: {result.stageTimings.postprocessMs || 0}ms</span>
-                        </>
-                      )}
+                  <h3 className="text-base font-bold text-slate-900">Download Result</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">High-resolution transparent cutout</p>
+                </div>
+
+                <div className="space-y-3">
+                  {/* Primary Download Button */}
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    disabled={!result || isProcessing}
+                    className="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-blue-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {selectedBgColor !== 'transparent' ? 'Download with Background' : 'Download Transparent PNG'}
+                    </span>
+                  </button>
+
+                  {/* HD Download Button */}
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    disabled={!result || isProcessing}
+                    className="w-full py-3 px-6 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 text-white font-bold text-xs rounded-2xl shadow-sm transition-all cursor-pointer flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileCheck className="w-4 h-4 text-emerald-400" />
+                      <span>Download HD Full Size</span>
                     </div>
+                    <span className="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">
+                      {imageDims ? `${imageDims.width} × ${imageDims.height}` : '4K UHD'}
+                    </span>
+                  </button>
+
+                  {/* Add to Design Studio Button */}
+                  {onBackToStudio && (
+                    <button
+                      type="button"
+                      onClick={onBackToStudio}
+                      className="w-full py-3 px-6 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <ArrowLeft className="w-4 h-4 text-slate-600" />
+                      <span>Use in Design Studio Canvas</span>
+                    </button>
                   )}
+                </div>
+
+                {/* Upload Another Image */}
+                <div className="pt-4 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Upload Another Image</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-                {onBackToStudio && (
-                  <button
-                    onClick={onBackToStudio}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white text-sm font-bold rounded-xl border border-white/20 transition-all cursor-pointer"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Back to Studio</span>
-                  </button>
-                )}
-                <button
-                  onClick={handleDownload}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all cursor-pointer hover:scale-[1.02]"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Transparent PNG</span>
-                </button>
+              {/* Quality & Technology Guarantee Box */}
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs text-slate-600 space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-slate-800">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                  <span>100% Automatic & Free</span>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Processes directly on your computer with sub-pixel edge matting and hair fidelity. No images are sent to external servers.
+                </p>
               </div>
             </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -694,8 +854,8 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
             </button>
 
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 bg-red-50 text-red-700 rounded-2xl">
-                <Key className="w-6 h-6" />
+              <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
+                <KeyRound className="w-6 h-6" />
               </div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Remove.bg Cloud API (Optional)</h3>
@@ -704,7 +864,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed mb-4">
-              INFYUM DESIGN executes client-side WebGPU/WASM machine learning directly on your device with no cost, zero network transmission, and total privacy. If you wish to benchmark with Remove.bg, paste your API key below:
+              INFYUM DESIGN executes client-side WebAssembly machine learning directly on your device with no cost, zero network transmission, and total privacy. If you wish to benchmark with Remove.bg API, enter your API key below:
             </p>
 
             <input
@@ -712,7 +872,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
               placeholder="Paste Remove.bg API Key here"
               defaultValue={apiKey}
               id="apiKeyInput"
-              className="w-full px-4 py-2.5 text-xs border border-slate-200 rounded-xl focus:border-red-600 focus:outline-hidden font-mono mb-4"
+              className="w-full px-4 py-2.5 text-xs border border-slate-200 rounded-xl focus:border-blue-600 focus:outline-hidden font-mono mb-4"
             />
 
             <div className="flex items-center justify-end gap-2">
@@ -727,7 +887,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                   const val = (document.getElementById('apiKeyInput') as HTMLInputElement)?.value || '';
                   handleSaveApiKey(val);
                 }}
-                className="px-4 py-2 text-xs font-bold text-white bg-red-700 hover:bg-red-800 rounded-xl cursor-pointer shadow-xs"
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer shadow-xs"
               >
                 Save Settings
               </button>
