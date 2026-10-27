@@ -16,14 +16,14 @@ const hasRescaleTrue = workerCode.includes("rescale: true");
 const hasNoisePurge = workerCode.includes("a <= lowThresh");
 const hasCoreSolidify = workerCode.includes("a >= highThresh");
 const hasZeroColorCorruption = workerCode.includes("data[i - 1] = 0") && workerCode.includes("data[i - 2] = 0");
-const hasRawRgbaFastPath = workerCode.includes("image/x-rgba8");
+const hasCacheStorage = workerCode.includes("infyum-ai-model-cache-v1");
 
 console.log(`  ✓ Default Model: Turbo Q8 (isnet_quint8): ${hasQuint8Default ? 'PASS' : 'FAIL'}`);
 console.log(`  ✓ 100% Dimensions Preservation (rescale: true): ${hasRescaleTrue ? 'PASS' : 'FAIL'}`);
 console.log(`  ✓ Residual Noise Purge (alpha <= lowThresh -> 0): ${hasNoisePurge ? 'PASS' : 'FAIL'}`);
 console.log(`  ✓ Subject Core Solidification (alpha >= highThresh -> 255): ${hasCoreSolidify ? 'PASS' : 'FAIL'}`);
 console.log(`  ✓ Zero Color Corruption (Zeroed RGB on transparent pixels): ${hasZeroColorCorruption ? 'PASS' : 'FAIL'}`);
-console.log(`  ✓ Zero-Copy Raw RGBA Fast Path (Bypasses double-PNG encode): ${hasRawRgbaFastPath ? 'PASS' : 'FAIL'}`);
+console.log(`  ✓ Persistent CacheStorage Accelerator (0ms cached loads): ${hasCacheStorage ? 'PASS' : 'FAIL'}`);
 
 // 2. Audit imageService.ts Implementation
 const servicePath = path.resolve('src/services/imageService.ts');

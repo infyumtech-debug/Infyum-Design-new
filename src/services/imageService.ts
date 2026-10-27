@@ -270,11 +270,11 @@ export function isAIModelPreloaded(modelType: AIModelType = 'isnet_quint8'): boo
 }
 
 /**
- * Safely scales down ultra-large images (> 3840px / 4K UHD) to prevent browser memory exhaustion.
- * - Fast Path (<= 3840px): Returns the original file instantly (0ms latency, zero main-thread work).
- * - Ultra-HD Path (> 3840px): Scales down using high-speed JPEG compression (takes ~70ms instead of ~7000ms for PNG).
+ * Safely scales down ultra-large images (> 2560px / QHD) to prevent browser memory exhaustion.
+ * - Fast Path (<= 2560px): Returns the original file instantly (0ms latency, zero main-thread work).
+ * - Ultra-HD Path (> 2560px): Scales down using high-speed JPEG compression (takes ~70ms instead of ~7000ms for PNG).
  */
-async function prepareOptimizedFile(file: File, maxDim = 3840): Promise<{ file: File; width: number; height: number }> {
+async function prepareOptimizedFile(file: File, maxDim = 2560): Promise<{ file: File; width: number; height: number }> {
   const { width, height } = await getImageDimensions(file);
   if (width <= maxDim && height <= maxDim) {
     return { file, width, height };
@@ -330,54 +330,74 @@ export async function removeImageBackground(
     ? (cleanFringeOrMatting ? 'clean' : 'off')
     : cleanFringeOrMatting;
 
-  // Zero-copy image dimensions extraction & 4K memory safety guard
+  // Zero-copy image dimensions extraction & memory safety guard
   const { file: processFile, width: origWidth, height: origHeight } = await prepareOptimizedFile(file);
 
-  // 1. External Cloud API (Remove.bg) with granular network diagnostics
+  // 1. External Cloud API (Remove.bg / Photoroom) with automatic local fallback
   if (customApiKey && customApiKey.trim().length > 10) {
-    onProgress?.('Connecting to Remove.bg API...', 15);
-    const t0 = performance.now();
+    try {
+      onProgress?.('Connecting to Cloud AI API...', 15);
+      const t0 = performance.now();
 
-    const formData = new FormData();
-    formData.append('image_file', processFile);
-    formData.append('size', 'auto');
+      const formData = new FormData();
+      formData.append('image_file', processFile);
+      formData.append('size', 'auto');
 
-    onProgress?.('Uploading image to Remove.bg...', 35);
-    const tUpload = performance.now();
-    const res = await fetch('https://api.remove.bg/v1.0/removebg', {
-      method: 'POST',
-      headers: { 'X-Api-Key': customApiKey.trim() },
-      body: formData,
-    });
-    const tResponse = performance.now();
+      onProgress?.('Uploading image tensor to Cloud AI...', 35);
+      const tUpload = performance.now();
+      
+      // Try Remove.bg
+      let res = await fetch('https://api.remove.bg/v1.0/removebg', {
+        method: 'POST',
+        headers: { 'X-Api-Key': customApiKey.trim() },
+        body: formData,
+      });
+      let tResponse = performance.now();
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Remove.bg API error (${res.status}): ${errText}`);
-    }
-
-    onProgress?.('Downloading transparent PNG...', 80);
-    const blob = await res.blob();
-    const tDownload = performance.now();
-    const url = URL.createObjectURL(blob);
-    const duration = Math.round(tDownload - t0);
-
-    return {
-      blob,
-      url,
-      filename,
-      width: origWidth,
-      height: origHeight,
-      originalSize: file.size,
-      outputSize: blob.size,
-      processingTimeMs: duration,
-      accelerationMode: 'Cloud API (Remove.bg)',
-      stageTimings: {
-        uploadMs: Math.round(tResponse - tUpload),
-        apiResponseMs: Math.round(tResponse - t0),
-        downloadMs: Math.round(tDownload - tResponse)
+      // If key is not valid for Remove.bg, attempt Photoroom endpoint
+      if (res.status === 401 || res.status === 403) {
+        const prFormData = new FormData();
+        prFormData.append('image_file', processFile);
+        const prRes = await fetch('https://sdk.photoroom.com/v1/segment', {
+          method: 'POST',
+          headers: { 'x-api-key': customApiKey.trim() },
+          body: prFormData
+        });
+        if (prRes.ok) {
+          res = prRes;
+          tResponse = performance.now();
+        }
       }
-    };
+
+      if (res.ok) {
+        onProgress?.('Downloading transparent PNG...', 80);
+        const blob = await res.blob();
+        const tDownload = performance.now();
+        const url = URL.createObjectURL(blob);
+        const duration = Math.round(tDownload - t0);
+
+        return {
+          blob,
+          url,
+          filename,
+          width: origWidth,
+          height: origHeight,
+          originalSize: file.size,
+          outputSize: blob.size,
+          processingTimeMs: duration,
+          accelerationMode: 'Cloud AI API (Instant HD)',
+          stageTimings: {
+            uploadMs: Math.round(tResponse - tUpload),
+            apiResponseMs: Math.round(tResponse - t0),
+            downloadMs: Math.round(tDownload - tResponse)
+          }
+        };
+      } else {
+        console.warn(`Cloud API returned status ${res.status}. Seamlessly falling back to local Turbo AI engine.`);
+      }
+    } catch (cloudErr) {
+      console.warn('Cloud API request failed, falling back to local Turbo AI engine:', cloudErr);
+    }
   }
 
   // 2. Dedicated Non-blocking Web Worker Execution
