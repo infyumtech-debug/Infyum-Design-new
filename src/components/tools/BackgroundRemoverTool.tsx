@@ -8,6 +8,7 @@ import {
   cancelBackgroundRemoval, 
   downloadFile, 
   formatBytes, 
+  invertImageMask,
   type ImageConversionResult, 
   type AIModelType,
   type MattingMode
@@ -28,7 +29,12 @@ import {
   Palette, 
   Eye, 
   Plus,
-  RotateCw
+  RotateCw,
+  ArrowLeftRight,
+  Eraser,
+  Paintbrush,
+  Undo2,
+  ShieldCheck
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -100,6 +106,8 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
   const [customColor, setCustomColor] = useState<string>('#ffffff');
   const [viewMode, setViewMode] = useState<'single' | 'split'>('single');
   const [sliderPosition, setSliderPosition] = useState<number>(50);
+  const [isTouchupOpen, setIsTouchupOpen] = useState<boolean>(false);
+  const [maskIsInverted, setMaskIsInverted] = useState<boolean>(false);
 
   // Model & Processing Settings
   const [modelType, setModelType] = useState<AIModelType>('isnet_quint8');
@@ -284,7 +292,54 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
     setIsProcessing(false);
     setSelectedBgColor('transparent');
     setIsEditingBg(false);
+    setIsTouchupOpen(false);
+    setMaskIsInverted(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleInvertMask = async () => {
+    if (!result || !selectedFile || isProcessing) return;
+    setIsProcessing(true);
+    setProgressStatus('Inverting alpha mask (restoring front subject)...');
+    setProgressPercent(80);
+    try {
+      const inverted = await invertImageMask(selectedFile, result.blob);
+      setResult({
+        ...result,
+        blob: inverted.blob,
+        url: inverted.url,
+        outputSize: inverted.blob.size
+      });
+      setMaskIsInverted(prev => !prev);
+      confetti({
+        particleCount: 40,
+        spread: 60,
+        origin: { y: 0.8 },
+        colors: ['#2563eb', '#10b981', '#f59e0b']
+      });
+    } catch (err: any) {
+      setErrorMessage('Mask inversion failed: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleApplyTouchup = (newBlob: Blob) => {
+    if (!result) return;
+    const newUrl = URL.createObjectURL(newBlob);
+    setResult({
+      ...result,
+      blob: newBlob,
+      url: newUrl,
+      outputSize: newBlob.size
+    });
+    setIsTouchupOpen(false);
+    confetti({
+      particleCount: 40,
+      spread: 70,
+      origin: { y: 0.8 },
+      colors: ['#2563eb', '#10b981', '#38bdf8']
+    });
   };
 
   const handleDownloadWithBg = (transparentUrl: string, bgColor: string, baseFilename: string) => {
@@ -323,9 +378,10 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
 
   const handleCycleMatting = () => {
     const nextMode: MattingMode = 
+      mattingMode === 'protect-subject' ? 'clean' :
       mattingMode === 'clean' ? 'strong' :
       mattingMode === 'strong' ? 'natural' :
-      mattingMode === 'natural' ? 'off' : 'clean';
+      mattingMode === 'natural' ? 'off' : 'protect-subject';
     
     setMattingMode(nextMode);
     if (selectedFile && !isProcessing) {
@@ -364,7 +420,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
         headers: { 'x-api-key': keyToTest.trim() }
       });
       if (prRes.status === 200 || prRes.status === 400) {
-        setKeyTestStatus('✓ Key verified with Cloud AI SDK! Cloud acceleration active.');
+        setKeyTestStatus('✓ Key format verified with Photoroom API! (Note: pk_ is a public key; full cloud processing requires sk_ secret key or paid plan. Local Turbo AI is active as high-speed fallback).');
         setIsTestingKey(false);
         return;
       }
@@ -428,12 +484,21 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
           <button
             onClick={handleCycleMatting}
             disabled={isProcessing}
-            title="Cycle edge matting mode: Balanced (default), Strong (cleans stubborn backgrounds), Soft (flyaway hair), or Off"
-            className="px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 bg-blue-50 text-blue-700 border-blue-200 shadow-2xs hover:bg-blue-100/70"
+            title="Cycle edge matting mode: Protect Front (prevents erasing subject details), Balanced (default), Strong, Soft, or Off"
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              mattingMode === 'protect-subject'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                : 'bg-blue-50 text-blue-700 border-blue-200 shadow-2xs hover:bg-blue-100/70'
+            }`}
           >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
+            {mattingMode === 'protect-subject' ? (
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            ) : (
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+            )}
             <span className="hidden sm:inline">
-              {mattingMode === 'clean' ? 'Matting: Balanced' :
+              {mattingMode === 'protect-subject' ? 'Matting: Protect Front' :
+               mattingMode === 'clean' ? 'Matting: Balanced' :
                mattingMode === 'strong' ? 'Matting: Strong' :
                mattingMode === 'natural' ? 'Matting: Soft' : 'Matting: Off'}
             </span>
@@ -623,6 +688,34 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                       >
                         <Split className="w-3.5 h-3.5" />
                         <span>Compare Slider</span>
+                      </button>
+                    )}
+
+                    {/* Quick Invert Mask Button */}
+                    {result && viewMode === 'single' && resultTab === 'removed' && (
+                      <button
+                        type="button"
+                        onClick={handleInvertMask}
+                        disabled={isProcessing}
+                        title="Invert Selection: Swaps Subject & Background (Fixes images where front of subject was cut out)"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100/80 shadow-2xs"
+                      >
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600" />
+                        <span>{maskIsInverted ? 'Revert Mask' : 'Invert Subject / BG'}</span>
+                      </button>
+                    )}
+
+                    {/* Touch-Up Erase / Restore Studio Button */}
+                    {result && viewMode === 'single' && resultTab === 'removed' && (
+                      <button
+                        type="button"
+                        onClick={() => setIsTouchupOpen(true)}
+                        disabled={isProcessing}
+                        title="Erase or Restore subject details with an interactive brush"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        <Eraser className="w-3.5 h-3.5 text-slate-600" />
+                        <span>Erase / Restore</span>
                       </button>
                     )}
 
@@ -960,7 +1053,7 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
 
                 {/* Reprocess Option when User adjusts Matting */}
                 {result && !isProcessing && (
-                  <div className="pt-3 border-t border-slate-100">
+                  <div className="pt-3 border-t border-slate-100 space-y-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -969,7 +1062,23 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
                       className="w-full py-2 px-3 bg-blue-50/60 hover:bg-blue-100/70 text-blue-700 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
-                      <span>Re-run with {mattingMode === 'clean' ? 'Balanced' : mattingMode === 'strong' ? 'Strong' : 'Soft'} Matting</span>
+                      <span>
+                        Re-run with {
+                          mattingMode === 'protect-subject' ? 'Protect Front' :
+                          mattingMode === 'clean' ? 'Balanced' :
+                          mattingMode === 'strong' ? 'Strong' :
+                          mattingMode === 'natural' ? 'Soft' : 'Raw'
+                        } Matting
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleInvertMask}
+                      className="w-full py-2 px-3 bg-amber-50/60 hover:bg-amber-100/80 text-amber-800 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5 border border-amber-200"
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Invert Mask (Swap Front / BG)</span>
                     </button>
                   </div>
                 )}
@@ -1081,6 +1190,404 @@ export const BackgroundRemoverTool: React.FC<BackgroundRemoverToolProps> = ({ on
           </div>
         </div>
       )}
+
+      {/* Interactive Touch-Up Erase & Restore Studio Modal */}
+      {isTouchupOpen && originalPreviewUrl && result && (
+        <TouchUpModal
+          isOpen={isTouchupOpen}
+          onClose={() => setIsTouchupOpen(false)}
+          originalUrl={originalPreviewUrl}
+          cutoutUrl={result.url}
+          onApply={handleApplyTouchup}
+        />
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// Interactive Touch-Up Studio (Erase & Restore Brush)
+// Allows pixel-perfect restoration of missing subject parts or erasing stray background
+// ============================================================================
+interface TouchUpModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  originalUrl: string;
+  cutoutUrl: string;
+  onApply: (blob: Blob) => void;
+}
+
+const TouchUpModal: React.FC<TouchUpModalProps> = ({
+  isOpen,
+  onClose,
+  originalUrl,
+  cutoutUrl,
+  onApply
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const origImgRef = useRef<HTMLImageElement | null>(null);
+  const cutoutImgRef = useRef<HTMLImageElement | null>(null);
+  const [tool, setTool] = useState<'restore' | 'erase'>('restore');
+  const [brushSize, setBrushSize] = useState<number>(30);
+  const [isDrawing, setIsDrawing] = useState<boolean>(false);
+  const [history, setHistory] = useState<ImageData[]>([]);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const lastPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setHistory([]);
+      return;
+    }
+
+    let isMounted = true;
+    const orig = new Image();
+    orig.crossOrigin = 'anonymous';
+    const cutout = new Image();
+    cutout.crossOrigin = 'anonymous';
+
+    let loadedCount = 0;
+    const onBothLoaded = () => {
+      loadedCount++;
+      if (loadedCount === 2 && isMounted && canvasRef.current) {
+        origImgRef.current = orig;
+        cutoutImgRef.current = cutout;
+        const canvas = canvasRef.current;
+        canvas.width = cutout.naturalWidth || cutout.width;
+        canvas.height = cutout.naturalHeight || cutout.height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(cutout, 0, 0);
+          setHistory([ctx.getImageData(0, 0, canvas.width, canvas.height)]);
+        }
+      }
+    };
+
+    orig.onload = onBothLoaded;
+    cutout.onload = onBothLoaded;
+    orig.src = originalUrl;
+    cutout.src = cutoutUrl;
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, originalUrl, cutoutUrl]);
+
+  const getCanvasCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const drawStroke = (x1: number, y1: number, x2: number, y2: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !origImgRef.current) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    ctx.save();
+    if (tool === 'restore') {
+      const pattern = ctx.createPattern(origImgRef.current, 'no-repeat');
+      if (pattern) {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = pattern;
+        ctx.strokeStyle = pattern;
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x2, y2, brushSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x2, y2, brushSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.setPointerCapture(e.pointerId);
+    const coords = getCanvasCoords(e);
+    lastPosRef.current = coords;
+    setIsDrawing(true);
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (ctx) {
+      const snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      setHistory(prev => [...prev.slice(-15), snapshot]);
+    }
+    drawStroke(coords.x, coords.y, coords.x, coords.y);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    setCursorPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+
+    if (!isDrawing || !lastPosRef.current) return;
+    const coords = getCanvasCoords(e);
+    drawStroke(lastPosRef.current.x, lastPosRef.current.y, coords.x, coords.y);
+    lastPosRef.current = coords;
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (isDrawing) {
+      setIsDrawing(false);
+      lastPosRef.current = null;
+      try {
+        canvasRef.current?.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+  };
+
+  const handleUndo = () => {
+    if (history.length <= 1) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    const newHist = [...history];
+    newHist.pop();
+    const stateToRestore = newHist[newHist.length - 1];
+    if (stateToRestore) {
+      ctx.putImageData(stateToRestore, 0, 0);
+      setHistory(newHist);
+    }
+  };
+
+  const handleResetToCutout = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !cutoutImgRef.current) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(cutoutImgRef.current, 0, 0);
+    setHistory([ctx.getImageData(0, 0, canvas.width, canvas.height)]);
+  };
+
+  const handleModalInvert = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !origImgRef.current) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    setHistory(prev => [...prev.slice(-15), ctx.getImageData(0, 0, canvas.width, canvas.height)]);
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const maskData = ctx.getImageData(0, 0, w, h);
+
+    const origCanvas = document.createElement('canvas');
+    origCanvas.width = w;
+    origCanvas.height = h;
+    const origCtx = origCanvas.getContext('2d', { willReadFrequently: true });
+    if (!origCtx) return;
+
+    origCtx.drawImage(origImgRef.current, 0, 0, w, h);
+    const origData = origCtx.getImageData(0, 0, w, h);
+
+    for (let i = 0; i < maskData.data.length; i += 4) {
+      const a = maskData.data[i + 3];
+      maskData.data[i + 3] = 255 - a;
+      maskData.data[i] = origData.data[i];
+      maskData.data[i + 1] = origData.data[i + 1];
+      maskData.data[i + 2] = origData.data[i + 2];
+    }
+    ctx.putImageData(maskData, 0, 0);
+  };
+
+  const handleSave = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (blob) onApply(blob);
+    }, 'image/png');
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-100 overflow-hidden">
+        {/* Top Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <Paintbrush className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Erase & Restore Touch-Up</h3>
+              <p className="text-[11px] text-slate-500">Paint over missing subject parts to restore them, or erase unwanted background</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Tools Toolbar */}
+        <div className="px-6 py-3 bg-slate-50 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            {/* Tool Selection */}
+            <div className="flex items-center p-1 bg-white border border-slate-200 rounded-xl shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setTool('restore')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  tool === 'restore'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Paintbrush className="w-3.5 h-3.5" />
+                <span>Restore Subject (Front)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool('erase')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  tool === 'erase'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Eraser className="w-3.5 h-3.5" />
+                <span>Erase Background</span>
+              </button>
+            </div>
+
+            {/* Brush Size Slider */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-xl shadow-2xs font-semibold text-slate-700">
+              <span className="text-[11px] text-slate-500">Size:</span>
+              <input
+                type="range"
+                min="5"
+                max="90"
+                value={brushSize}
+                onChange={(e) => setBrushSize(parseInt(e.target.value, 10))}
+                className="w-24 accent-blue-600 cursor-pointer"
+              />
+              <span className="w-7 text-[11px] font-mono text-slate-600">{brushSize}px</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Invert Mask Inside Editor */}
+            <button
+              type="button"
+              onClick={handleModalInvert}
+              title="Invert current alpha mask (swaps foreground and background)"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold transition-colors cursor-pointer shadow-2xs"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600" />
+              <span>Invert Mask</span>
+            </button>
+
+            {/* Undo */}
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={history.length <= 1}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-slate-700 font-bold transition-colors cursor-pointer shadow-2xs"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              <span>Undo</span>
+            </button>
+
+            {/* Reset */}
+            <button
+              type="button"
+              onClick={handleResetToCutout}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 font-semibold transition-colors cursor-pointer shadow-2xs"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>Reset</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Canvas Area */}
+        <div className="flex-1 min-h-[350px] max-h-[58vh] bg-slate-100 p-4 flex items-center justify-center relative overflow-hidden select-none">
+          <div className="relative rounded-2xl overflow-hidden shadow-md border border-slate-300 bg-checkerboard flex items-center justify-center max-w-full max-h-full">
+            <canvas
+              ref={canvasRef}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={() => { setIsDrawing(false); setCursorPos(null); }}
+              className="max-w-full max-h-[54vh] object-contain cursor-crosshair touch-none"
+            />
+
+            {/* Dynamic Brush Size Hover Ring */}
+            {cursorPos && (
+              <div
+                className="pointer-events-none absolute rounded-full border-2 transform -translate-x-1/2 -translate-y-1/2 transition-transform duration-75"
+                style={{
+                  left: cursorPos.x,
+                  top: cursorPos.y,
+                  width: brushSize,
+                  height: brushSize,
+                  borderColor: tool === 'restore' ? '#10b981' : '#f43f5e',
+                  backgroundColor: tool === 'restore' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)'
+                }}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Bottom Actions Bar */}
+        <div className="px-6 py-4 border-t border-slate-100 bg-white flex items-center justify-between">
+          <span className="text-xs text-slate-500">
+            {tool === 'restore' 
+              ? '💡 Tip: Click and drag over missing parts of your subject to restore original pixels.' 
+              : '💡 Tip: Click and drag over remaining background patches to erase them to transparent.'}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="px-5 py-2 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-md shadow-blue-600/25 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Check className="w-4 h-4" />
+              <span>Apply & Save Changes</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

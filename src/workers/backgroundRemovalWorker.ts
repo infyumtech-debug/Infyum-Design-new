@@ -1,6 +1,6 @@
 import { removeBackground, preload, type Config } from '@imgly/background-removal';
 
-export type MattingMode = 'clean' | 'strong' | 'natural' | 'off';
+export type MattingMode = 'clean' | 'strong' | 'natural' | 'protect-subject' | 'off';
 
 export interface WorkerMessageIn {
   id: string;
@@ -10,6 +10,7 @@ export interface WorkerMessageIn {
   publicPath: string;
   cleanFringe?: boolean;
   mattingMode?: MattingMode;
+  invertMask?: boolean;
 }
 
 export interface WorkerStageTimings {
@@ -77,11 +78,18 @@ function applyMattingRefinement(
   if (mode === 'off') return;
 
   // Threshold tuning:
-  // - 'clean' (Balanced): noise <= 8 -> 0; core >= 238 -> 255
-  // - 'strong' (Aggressive): noise <= 16 -> 0; core >= 225 -> 255
-  // - 'natural' (Soft): noise <= 4 -> 0; core >= 250 -> 255
-  const lowThresh = mode === 'strong' ? 16 : mode === 'natural' ? 4 : 8;
-  const highThresh = mode === 'strong' ? 225 : mode === 'natural' ? 250 : 238;
+  // - 'protect-subject' (Preserve Front Subject):
+  //    Protects low-contrast front details (white shirts, headlights, transparent items, hair).
+  //    Only true noise (alpha <= 2) is zeroed; core (alpha >= 130) is boosted to 255;
+  //    mid-range values are gently enhanced so the front of the image is never deleted.
+  // - 'clean' (Balanced Default):
+  //    noise <= 4 -> 0; core >= 195 -> 255. Smooth transition without eating foreground.
+  // - 'strong' (Aggressive):
+  //    noise <= 14 -> 0; core >= 210 -> 255. Cleans high-contrast stubborn backgrounds.
+  // - 'natural' (Soft):
+  //    noise <= 3 -> 0; core >= 220 -> 255. Preserves fine flyaway hair.
+  const lowThresh = mode === 'strong' ? 14 : mode === 'natural' ? 3 : mode === 'protect-subject' ? 2 : 4;
+  const highThresh = mode === 'strong' ? 210 : mode === 'natural' ? 220 : mode === 'protect-subject' ? 130 : 195;
   const range = highThresh - lowThresh;
 
   for (let i = 3; i < data.length; i += 4) {
@@ -94,8 +102,14 @@ function applyMattingRefinement(
     } else if (a >= highThresh) {
       data[i] = 255;
     } else {
-      const t = (a - lowThresh) / range;
-      data[i] = Math.round(t * t * (3 - 2 * t) * 255);
+      if (mode === 'protect-subject') {
+        const t = (a - lowThresh) / range;
+        const boosted = Math.pow(t, 0.65);
+        data[i] = Math.round(boosted * 255);
+      } else {
+        const t = (a - lowThresh) / range;
+        data[i] = Math.round(t * t * (3 - 2 * t) * 255);
+      }
     }
   }
 }
@@ -106,10 +120,12 @@ function applyMattingRefinement(
  */
 async function refineTransparentImage(
   maskBlob: Blob,
-  mattingMode: MattingMode = 'clean'
+  mattingMode: MattingMode = 'clean',
+  invertMask: boolean = false,
+  originalFile?: Blob | File
 ): Promise<{ blob: Blob; width: number; height: number }> {
-  // If matting is off or browser doesn't have createImageBitmap, return pristine neural PNG
-  if (mattingMode === 'off' || typeof createImageBitmap === 'undefined') {
+  // If matting is off, not inverting, and no browser createImageBitmap, return pristine neural PNG
+  if (mattingMode === 'off' && !invertMask || typeof createImageBitmap === 'undefined') {
     return { blob: maskBlob, width: 0, height: 0 };
   }
 
@@ -130,6 +146,33 @@ async function refineTransparentImage(
       return { blob: maskBlob, width: origW, height: origH };
     }
 
+    if (invertMask && originalFile) {
+      // Invert mask and restore original image RGB pixels
+      const origBmp = await createImageBitmap(originalFile);
+      ctx.drawImage(origBmp, 0, 0, origW, origH);
+      origBmp.close();
+      const origImgData = ctx.getImageData(0, 0, origW, origH);
+
+      // Create a temporary canvas to read the mask alpha
+      const maskCanvas = new OffscreenCanvas(origW, origH);
+      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+      if (maskCtx) {
+        maskCtx.drawImage(bmp, 0, 0);
+        bmp.close();
+        const maskImgData = maskCtx.getImageData(0, 0, origW, origH);
+
+        for (let i = 0; i < origImgData.data.length; i += 4) {
+          const maskAlpha = maskImgData.data[i + 3];
+          origImgData.data[i + 3] = 255 - maskAlpha;
+        }
+
+        applyMattingRefinement(origImgData.data, mattingMode);
+        ctx.putImageData(origImgData, 0, 0);
+        const finalBlob = await canvas.convertToBlob({ type: 'image/png' });
+        return { blob: finalBlob, width: origW, height: origH };
+      }
+    }
+
     ctx.drawImage(bmp, 0, 0);
     bmp.close();
 
@@ -148,7 +191,7 @@ async function refineTransparentImage(
 export const refineAlphaEdges = refineTransparentImage;
 
 self.onmessage = async (e: MessageEvent<WorkerMessageIn>) => {
-  const { id, type, file, modelType, publicPath, cleanFringe, mattingMode: incomingMattingMode } = e.data;
+  const { id, type, file, modelType, publicPath, cleanFringe, mattingMode: incomingMattingMode, invertMask } = e.data;
 
   // Resolve matting mode
   const resolvedMattingMode: MattingMode = incomingMattingMode || (cleanFringe === false ? 'off' : 'clean');
@@ -248,7 +291,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessageIn>) => {
       } as WorkerMessageOut);
 
       const tPostStart = performance.now();
-      const refined = await refineTransparentImage(rawMaskBlob, resolvedMattingMode);
+      const refined = await refineTransparentImage(rawMaskBlob, resolvedMattingMode, Boolean(invertMask), file);
       const tEnd = performance.now();
 
       const stageTimings: WorkerStageTimings = {

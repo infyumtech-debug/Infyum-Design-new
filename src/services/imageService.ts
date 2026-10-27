@@ -31,7 +31,7 @@ export interface ProgressCallback {
 }
 
 export type AIModelType = 'isnet_quint8' | 'isnet_fp16';
-export type MattingMode = 'clean' | 'strong' | 'natural' | 'off';
+export type MattingMode = 'clean' | 'strong' | 'natural' | 'protect-subject' | 'off';
 
 /**
  * Format bytes to human-readable string (e.g. 1.25 MB)
@@ -310,6 +310,89 @@ async function prepareOptimizedFile(file: File, maxDim = 2560): Promise<{ file: 
 }
 
 /**
+ * Instant in-memory mask inversion (swaps foreground subject and background in <15ms).
+ * Takes the original image pixels and inverts the alpha channel so if the AI
+ * ever removed the front subject instead of the background, the subject is 100% restored!
+ */
+export async function invertImageMask(
+  originalFile: File | Blob,
+  currentMaskBlob: Blob
+): Promise<{ blob: Blob; url: string; width: number; height: number }> {
+  const origBmp = await createImageBitmap(originalFile);
+  const maskBmp = await createImageBitmap(currentMaskBlob);
+  const width = origBmp.width;
+  const height = origBmp.height;
+
+  let canvas: HTMLCanvasElement | OffscreenCanvas;
+  let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+
+  if (typeof OffscreenCanvas !== 'undefined') {
+    canvas = new OffscreenCanvas(width, height);
+    ctx = canvas.getContext('2d');
+  } else {
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    ctx = canvas.getContext('2d');
+  }
+
+  if (!ctx) {
+    origBmp.close();
+    maskBmp.close();
+    throw new Error('Canvas 2D context unavailable');
+  }
+
+  // Draw original image to get full RGB channels
+  ctx.drawImage(origBmp, 0, 0, width, height);
+  origBmp.close();
+  const origImgData = ctx.getImageData(0, 0, width, height);
+
+  // Read current mask alpha
+  let maskCanvas: HTMLCanvasElement | OffscreenCanvas;
+  let maskCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    maskCanvas = new OffscreenCanvas(width, height);
+    maskCtx = maskCanvas.getContext('2d');
+  } else {
+    maskCanvas = document.createElement('canvas');
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    maskCtx = maskCanvas.getContext('2d');
+  }
+
+  if (!maskCtx) {
+    maskBmp.close();
+    throw new Error('Mask canvas context unavailable');
+  }
+
+  maskCtx.drawImage(maskBmp, 0, 0, width, height);
+  maskBmp.close();
+  const maskImgData = maskCtx.getImageData(0, 0, width, height);
+
+  // Invert alpha: 255 - currentAlpha while keeping original RGB colors
+  for (let i = 0; i < origImgData.data.length; i += 4) {
+    origImgData.data[i + 3] = 255 - maskImgData.data[i + 3];
+  }
+
+  ctx.putImageData(origImgData, 0, 0);
+
+  let finalBlob: Blob;
+  if ('convertToBlob' in canvas) {
+    finalBlob = await (canvas as OffscreenCanvas).convertToBlob({ type: 'image/png' });
+  } else {
+    finalBlob = await new Promise<Blob>((resolve, reject) => {
+      (canvas as HTMLCanvasElement).toBlob((b) => {
+        if (b) resolve(b);
+        else reject(new Error('Canvas to blob conversion failed'));
+      }, 'image/png');
+    });
+  }
+
+  const url = URL.createObjectURL(finalBlob);
+  return { blob: finalBlob, url, width, height };
+}
+
+/**
  * Tool 3: AI-based Background Removal
  * Executes inside dedicated Web Worker to keep UI 100% responsive,
  * applies sub-pixel edge refinement, and preserves 100% original dimensions.
@@ -319,7 +402,8 @@ export async function removeImageBackground(
   onProgress?: ProgressCallback,
   customApiKey?: string,
   modelType: AIModelType = 'isnet_quint8',
-  cleanFringeOrMatting: boolean | MattingMode = 'clean'
+  cleanFringeOrMatting: boolean | MattingMode = 'clean',
+  invertMask: boolean = false
 ): Promise<ImageConversionResult> {
   const startTime = performance.now();
   const baseName = file.name.replace(/\.[^/.]+$/, '');
@@ -458,7 +542,8 @@ export async function removeImageBackground(
         modelType,
         publicPath: getAssetPublicPath(false),
         cleanFringe: mattingMode !== 'off',
-        mattingMode
+        mattingMode,
+        invertMask
       });
     });
   }
